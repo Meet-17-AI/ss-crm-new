@@ -2782,8 +2782,11 @@ app.get('/api/public/booking/:booking_id', async (req, res) => {
         booking_host_name,
         booking_status,
         booking_cancel_reason,
-        booking_joining_link
-      FROM bookings 
+        booking_joining_link,
+        booking_mode,
+        therapist_id,
+        invitee_payment_amount
+      FROM bookings
       WHERE booking_id = $1
     `, [booking_id]);
 
@@ -2791,7 +2794,49 @@ app.get('/api/public/booking/:booking_id', async (req, res) => {
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    res.json(result.rows[0]);
+    const booking = result.rows[0];
+
+    // Look up matching service in therapy_services table to fetch description, duration, charges, etc.
+    let service = null;
+    if (booking.booking_resource_name) {
+      let serviceResult;
+      if (booking.therapist_id) {
+        serviceResult = await pool.query(`
+          SELECT title, duration, type, description, detailed_description, charges, slug
+          FROM therapy_services
+          WHERE (TRIM(title) ILIKE TRIM($1) OR TRIM(slug) ILIKE TRIM($1))
+            AND therapist_id = $2
+            AND is_active = true
+          LIMIT 1
+        `, [booking.booking_resource_name, booking.therapist_id]);
+      }
+
+      if (!serviceResult || serviceResult.rows.length === 0) {
+        serviceResult = await pool.query(`
+          SELECT title, duration, type, description, detailed_description, charges, slug
+          FROM therapy_services
+          WHERE (TRIM(title) ILIKE TRIM($1) OR TRIM(slug) ILIKE TRIM($1))
+            AND is_active = true
+          LIMIT 1
+        `, [booking.booking_resource_name]);
+      }
+
+      if (serviceResult.rows.length > 0) {
+        const s = serviceResult.rows[0];
+        service = {
+          title: s.title,
+          duration: s.duration,
+          type: s.type,
+          description: s.description,
+          detailedDescription: s.detailed_description || s.description || '',
+          charges: s.charges,
+          slug: s.slug
+        };
+      }
+    }
+
+    booking.service = service;
+    res.json(booking);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

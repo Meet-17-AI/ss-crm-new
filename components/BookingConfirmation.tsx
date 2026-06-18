@@ -21,6 +21,15 @@ interface BookingDetails {
   booking_status: 'confirmed' | 'cancelled';
   booking_cancel_reason: string | null;
   booking_joining_link: string | null;
+  service?: {
+    title: string;
+    duration: string;
+    type: string;
+    description: string;
+    detailedDescription: string;
+    charges: string;
+    slug: string;
+  } | null;
 }
 
 export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({ bookingId }) => {
@@ -130,10 +139,10 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({ bookin
     }]
   };
 
-  const service = therapistInfo.services.find((s: any) =>
+  const service = booking.service || (therapistInfo.services.find((s: any) =>
     s.title.toLowerCase().includes((booking.booking_resource_name || '').toLowerCase()) ||
     (booking.booking_resource_name || '').toLowerCase().includes(s.title.toLowerCase())
-  ) || therapistInfo.services[0];
+  ) || therapistInfo.services[0]);
 
   const isCancelled = booking.booking_status?.toLowerCase() === 'cancelled';
   // Use booking_start_at, fall back to booking_invitee_time
@@ -167,7 +176,15 @@ export const BookingConfirmation: React.FC<BookingConfirmationProps> = ({ bookin
 
           <div className="bp-desc">
             {(() => {
-              const paragraphs = service.detailedDescription.split('\n\n');
+              const descText = service.detailedDescription || '';
+              const isHtml = /<[a-z][\s\S]*>/i.test(descText);
+              
+              if (isHtml) {
+                const cleanHtml = descText.replace(/&nbsp;/g, ' ');
+                return <div dangerouslySetInnerHTML={{ __html: cleanHtml }} className="bp-desc-html" />;
+              }
+
+              const paragraphs = descText.split('\n\n');
               const isMobile = window.innerWidth <= 1024;
               const visible = (isMobile && !showFullDesc) ? paragraphs.slice(0, 1) : paragraphs;
               return (
