@@ -14,15 +14,12 @@ body {
   font-weight: 400; /* Ensure normal font weight by default */
 }
 
-/* Prevent unwanted bold text in production builds */
+/* Headings use their own font-weight (bold by default via component styles) */
 h1, h2, h3, h4, h5, h6 {
-  font-weight: inherit; /* Use the weight specified in component styles */
+  font-weight: bold;
 }
 
-/* Ensure normal font weight for regular text */
-p, span, div {
-  font-weight: 400;
-}
+/* Note: Do NOT add font-weight overrides for div/span/p here — it breaks Tailwind utility classes like font-bold */
 
 /* Hide native date picker icon */
 input[type="date"]::-webkit-calendar-picker-indicator {

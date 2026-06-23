@@ -7,6 +7,9 @@ import './MonthFilter.css'
 import { Loader } from '../../../components/Loader'
 import { Toast } from '../../../components/Toast'
 import { SendBookingModal } from '../../../components/SendBookingModal'
+import PretherapyFormComponent from '../../../components/PretherapyFormComponent'
+import FollowupRemarksComponent from '../../../components/FollowupRemarksComponent'
+import PretherapyIconComponent from '../../../components/PretherapyIconComponent'
 import MonthFilter from './MonthFilter'
 
 interface Lead {
@@ -28,6 +31,10 @@ interface Lead {
   stage_followup_3_at?: string
   consultation_outcome?: string
   tags?: string
+  last_interaction_at?: string
+  is_duplicate?: boolean
+  pretherapy_completed?: boolean
+  pretherapy_completed_at?: string
 }
 
 interface Stage {
@@ -81,6 +88,47 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [prefilledClientData, setPrefilledClientData] = useState<{ name: string, phone: string, email: string } | undefined>()
   const [unresponsiveConfirmData, setUnresponsiveConfirmData] = useState<Lead | null>(null)
+
+  const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null)
+  const [activeFormType, setActiveFormType] = useState<'pretherapy' | 'followup'>('pretherapy')
+  const [expandedFormData, setExpandedFormData] = useState<any>(null)
+  const [loadingExpandedForm, setLoadingExpandedForm] = useState(false)
+
+  const handleExpandCard = async (leadId: string, formType: 'pretherapy' | 'followup') => {
+    if (expandedLeadId === leadId && activeFormType === formType) {
+      setExpandedLeadId(null)
+      return
+    }
+    
+    setExpandedLeadId(leadId)
+    setActiveFormType(formType)
+    setExpandedFormData(null)
+    setLoadingExpandedForm(true)
+    
+    try {
+      const response = await fetch(`/api/leads/${leadId}/forms`)
+      if (response.ok) {
+        const json = await response.json()
+        setExpandedFormData(json.data)
+      }
+    } catch (err) {
+      console.error('Error fetching expanded form data:', err)
+    } finally {
+      setLoadingExpandedForm(false)
+    }
+  }
+
+  const isLeadInactive24h = (lead: Lead): boolean => {
+    if (lead.pipeline_stage && !['lead-inquire', 'pretherapy-call', 'followup-1'].includes(lead.pipeline_stage)) {
+      return false
+    }
+    const compareDateStr = lead.last_interaction_at || lead.date
+    if (!compareDateStr) return false
+    const compareTime = new Date(compareDateStr).getTime()
+    const now = new Date().getTime()
+    const diffHours = (now - compareTime) / (1000 * 60 * 60)
+    return diffHours >= 24
+  }
 
   // Pending drop — held until remark is confirmed
   const [pendingDrop, setPendingDrop] = useState<{
@@ -177,6 +225,10 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
               stage_followup_3_at: d.stage_followup_3_at,
               stage_lead_inquire_at: d.stage_lead_inquire_at,
               consultation_outcome: d.consultation_outcome,
+              last_interaction_at: d.last_interaction_at,
+              is_duplicate: d.is_duplicate,
+              pretherapy_completed: d.pretherapy_completed,
+              pretherapy_completed_at: d.pretherapy_completed_at,
             };
           })
 
@@ -561,7 +613,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                       return (
                         <div
                           key={lead.id}
-                          className={`lead-card ${!canAct ? 'view-only' : ''} ${editingSalesAssignment === lead.id ? 'active-dropdown' : ''} ${stage.id === 'dropouts' ? 'unresponsive-card' : ''}`}
+                          className={`lead-card ${!canAct ? 'view-only' : ''} ${editingSalesAssignment === lead.id ? 'active-dropdown' : ''} ${stage.id === 'dropouts' ? 'unresponsive-card' : ''} ${lead.is_duplicate ? 'duplicate-card' : ''} ${isLeadInactive24h(lead) ? 'inactive-24h' : ''}`}
                           style={stage.id === 'lead-inquire' ? getLeadInquireCardStyle(lead) : {}}
                           draggable={canAct}
                           onDragStart={(e) => {
@@ -573,6 +625,40 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                           onTouchMove={handleTouchMove}
                           onTouchEnd={handleTouchEnd}
                         >
+                          {lead.is_duplicate && (
+                            <div className="lead-tags-container" style={{ marginBottom: 6 }}>
+                              <span className="lead-tag-badge flex items-center gap-1" style={{ 
+                                background: '#fef2f2', 
+                                color: '#ef4444', 
+                                padding: '2px 8px', 
+                                borderRadius: '4px', 
+                                fontSize: '10px',
+                                fontWeight: '700',
+                                textTransform: 'uppercase',
+                                border: '1px solid #fee2e2',
+                                width: 'fit-content'
+                              }}>
+                                Duplicate Lead
+                              </span>
+                            </div>
+                          )}
+                          {isLeadInactive24h(lead) && (
+                            <div className="lead-tags-container" style={{ marginBottom: 6 }}>
+                              <span className="lead-tag-badge flex items-center gap-1" style={{ 
+                                background: '#fffbeb', 
+                                color: '#d97706', 
+                                padding: '2px 8px', 
+                                borderRadius: '4px', 
+                                fontSize: '10px',
+                                fontWeight: '700',
+                                textTransform: 'uppercase',
+                                border: '1px solid #fef3c7',
+                                width: 'fit-content'
+                              }}>
+                                No Interaction &gt; 24h
+                              </span>
+                            </div>
+                          )}
                         <div className="lead-card-header">
                           <h4
                             className="lead-name text-teal-700 hover:underline cursor-pointer"
@@ -700,7 +786,16 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                               </div>
                             </div>
 
-
+                            {/* Pretherapy completed tag/icon inside followup stage */}
+                            {stage.id === 'followup-1' && (
+                              <div className="mb-1.5 mt-0.5">
+                                <PretherapyIconComponent 
+                                  completed={lead.pretherapy_completed} 
+                                  completedAt={lead.pretherapy_completed_at}
+                                  showLabel={true}
+                                />
+                              </div>
+                            )}
 
                             {isPostPreTherapy(stage.id) && (
                               <div className="lead-assignment">
@@ -732,29 +827,72 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                               </div>
                             </div>
 
-                            {/* CRM Actions */}
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-                              {stage.id === 'followup-1' && (
+                            {/* Pre-therapy / Follow-up toggles */}
+                            {canAct && (stage.id === 'pretherapy-call' || stage.id === 'followup-1') && (
+                              <div className="flex gap-1.5 mt-2 bg-gray-50 p-1 rounded-md border border-gray-200" onClick={e => e.stopPropagation()}>
                                 <button
-                                  className="send-booking-btn"
-                                  style={{ background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0' }}
-                                  onClick={e => {
-                                    e.stopPropagation()
-                                    if (canAct) {
-                                      setPendingDrop({ lead, fromStageId: 'followup-1', toStageId: 'followup-1' })
-                                    }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleExpandCard(lead.id, 'pretherapy');
                                   }}
+                                  className={`flex-1 py-1 px-1.5 text-[10px] font-semibold rounded text-center transition-all ${
+                                    expandedLeadId === lead.id && activeFormType === 'pretherapy'
+                                      ? 'bg-teal-700 text-white shadow-sm'
+                                      : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
+                                  }`}
                                 >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                  </svg>
-                                  Update Follow-up
+                                  Pre-therapy Form
                                 </button>
-                              )}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleExpandCard(lead.id, 'followup');
+                                  }}
+                                  className={`flex-1 py-1 px-1.5 text-[10px] font-semibold rounded text-center transition-all ${
+                                    expandedLeadId === lead.id && activeFormType === 'followup'
+                                      ? 'bg-teal-700 text-white shadow-sm'
+                                      : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
+                                  }`}
+                                >
+                                  Follow-up Notes
+                                </button>
+                              </div>
+                            )}
 
+                            {/* Expandable form content */}
+                            {expandedLeadId === lead.id && (
+                              <div className="mt-3 pt-3 border-t border-gray-200" onClick={e => e.stopPropagation()}>
+                                {loadingExpandedForm ? (
+                                  <div className="text-center py-2">
+                                    <div className="inline-block w-4 h-4 border-2 border-gray-300 border-t-teal-700 rounded-full animate-spin"></div>
+                                    <p className="text-[10px] text-gray-500 mt-1">Loading...</p>
+                                  </div>
+                                ) : activeFormType === 'pretherapy' ? (
+                                  <PretherapyFormComponent
+                                    leadId={lead.id}
+                                    initialData={expandedFormData?.pretherapy?.fields}
+                                    onSaved={() => {
+                                      setExpandedLeadId(null);
+                                      setToast({ message: 'Pre-therapy form saved successfully', type: 'success' });
+                                      window.location.reload();
+                                    }}
+                                    onCancel={() => setExpandedLeadId(null)}
+                                  />
+                                ) : (
+                                  <FollowupRemarksComponent
+                                    leadId={lead.id}
+                                    initialData={expandedFormData?.followup?.fields}
+                                    onSaved={() => {
+                                      setExpandedLeadId(null);
+                                      setToast({ message: 'Follow-up notes saved successfully', type: 'success' });
+                                      window.location.reload();
+                                    }}
+                                    onCancel={() => setExpandedLeadId(null)}
+                                  />
+                                )}
+                              </div>
+                            )}
 
-                            </div>
                             {!canAct && (
                               <div className="view-only-badge">View Only</div>
                             )}

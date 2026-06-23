@@ -4,7 +4,7 @@ import './MonthFilter.css'
 import { Loader } from '../../../components/Loader'
 import { Toast } from '../../../components/Toast'
 import { SendBookingModal } from '../../../components/SendBookingModal'
-import { MoreVertical } from 'lucide-react'
+import { MoreVertical, Edit3 } from 'lucide-react'
 import PreTherapyCallFormModal, { PreTherapyFormData } from './PreTherapyCallFormModal'
 
 interface Lead {
@@ -868,7 +868,7 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
                                     }}
                                     title="Edit Form"
                                 >
-                                    ✏️ Edit
+                                    <Edit3 size={11} className="text-gray-500" /> Edit
                                 </button>
                             )}
                             <div style={{ fontSize: 13, lineHeight: 1.8, paddingRight: 50 }}>

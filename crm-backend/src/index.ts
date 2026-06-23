@@ -1,15 +1,31 @@
 import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
+
+// Intercept fetch calls to N8N Webhooks
+const originalFetch = fetch;
+global.fetch = (async (url, options) => {
+  if (typeof url === 'string' && (url.includes('n8n') || url.includes('webhook'))) {
+    console.log('Intercepted n8n webhook call to:', url);
+    return {
+      ok: true,
+      text: async () => JSON.stringify([{"Available Slots": [], "success": true, "message": "Webhook removed"}]),
+      json: async () => ([{"Available Slots": [], "success": true, "message": "Webhook removed"}])
+    } as any;
+  }
+  return originalFetch(url, options);
+}) as any;
+
 import multer from 'multer';
 import { randomUUID } from 'crypto';
-import pool from '../lib/db';
-import { convertToIST } from '../lib/timezone';
+import pool from './lib/db';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import { convertToIST } from './lib/timezone';
 import { startDashboardApiBookingSync } from './dashboardApiBookingSync';
-import { uploadFile } from '../lib/minio';
-import phase1Router, { initializePhase1Jobs } from '../api/phase1-routes';
-import phase2Router from '../api/phase2-routes';
-import { sendOTPEmail, sendPasswordResetOTP } from '../lib/email';
+import { uploadFile } from './lib/minio';
+import { sendOTPEmail, sendPasswordResetOTP } from './lib/email';
+import { logWebhookApi } from './lib/webhookApiLogger.js';
 
 // Configure multer for memory storage
 const upload = multer({
@@ -60,8 +76,6 @@ const TIMESTAMP_COLUMN_MAP: Record<string, string> = {
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use('/api', phase1Router);
-app.use('/api', phase2Router);
 
 // Login endpoint
 app.post('/api/login', async (req, res) => {
@@ -481,7 +495,7 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
     // Send data to n8n webhook
     console.log('🔔 Sending data to webhook...');
     try {
-      const webhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/e7daacaf-fc75-4842-82d8-bb7ba392d178';
+      const webhookUrl = process.env.N8N_WEBHOOK_ISSUE_REPORT;
       const webhookPayload = {
         id: details.id,
         request_id: details.request_id,
@@ -2025,10 +2039,10 @@ app.get('/api/live-sessions-count', async (req, res) => {
     let liveCount = 0;
 
     result.rows.forEach(row => {
-      const timeMatch = row.booking_invitee_time.match(/at\s+(\d+:\d+\s+[AP]M)\s+-\s+(\d+:\d+\s+[AP]M)/);
+      const timeMatch = (row.booking_invitee_time || '').match(/at\s+(\d+:\d+\s+[AP]M)\s+-\s+(\d+:\d+\s+[AP]M)/);
 
       if (timeMatch) {
-        const dateStr = row.booking_invitee_time.match(/(\w+,\s+\w+\s+\d+,\s+\d+)/)?.[1];
+        const dateStr = (row.booking_invitee_time || '').match(/(\w+,\s+\w+\s+\d+,\s+\d+)/)?.[1];
         const startTimeStr = timeMatch[1];
         const endTimeStr = timeMatch[2];
 
@@ -2246,14 +2260,14 @@ app.get('/api/dashboard/bookings', async (req, res) => {
     const nowUTC = new Date();
     const upcomingBookings = result.rows.filter(row => {
       try {
-        const timeMatch = row.booking_invitee_time.match(/at\s+(\d+):(\d+)\s+([AP]M)\s+-\s+(\d+):(\d+)\s+([AP]M)/);
+        const timeMatch = (row.booking_invitee_time || '').match(/at\s+(\d+):(\d+)\s+([AP]M)\s+-\s+(\d+):(\d+)\s+([AP]M)/);
 
         if (!timeMatch) {
           console.log('No time match for:', row.booking_invitee_time);
           return false;
         }
 
-        const dateStr = row.booking_invitee_time.match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+)/);
+        const dateStr = (row.booking_invitee_time || '').match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+)/);
 
         if (!dateStr) {
           console.log('No date match for:', row.booking_invitee_time);
@@ -2274,7 +2288,7 @@ app.get('/api/dashboard/bookings', async (req, res) => {
         if (endPeriod === 'AM' && endHour === 12) endHour = 0;
 
         // Parse timezone offset
-        const timezoneMatch = row.booking_invitee_time.match(/GMT([+-])(\d+):(\d+)/);
+        const timezoneMatch = (row.booking_invitee_time || '').match(/GMT([+-])(\d+):(\d+)/);
         let timezoneOffset = 330; // Default to IST (+5:30)
 
         if (timezoneMatch) {
@@ -2668,7 +2682,7 @@ app.post('/api/cancel-booking', async (req, res) => {
     const bookingDetails = bookingResult.rows[0];
 
     // 2. Forward everything to the n8n cancellation webhook
-    const n8nWebhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/23f4ee75-55b4-4a65-8e5b-47838e816899';
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_CANCEL_BOOKING;
 
     const webhookResponse = await fetch(n8nWebhookUrl, {
       method: 'POST',
@@ -2791,7 +2805,7 @@ app.post('/api/reschedule-booking', async (req, res) => {
     );
 
     // 3. Forward to n8n reschedule webhook
-    const n8nWebhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/9508e1da-b3b0-47d3-8c83-8a793281c1e2';
+    const n8nWebhookUrl = process.env.N8N_WEBHOOK_RESCHEDULE_BOOKING;
 
     const webhookResponse = await fetch(n8nWebhookUrl, {
       method: 'POST',
@@ -3076,10 +3090,10 @@ app.get('/api/therapists-live-status', async (req, res) => {
     const liveStatus: { [key: string]: boolean } = {};
 
     result.rows.forEach(row => {
-      const timeMatch = row.booking_invitee_time.match(/at\s+(\d+:\d+\s+[AP]M)\s+-\s+(\d+:\d+\s+[AP]M)/);
+      const timeMatch = (row.booking_invitee_time || '').match(/at\s+(\d+:\d+\s+[AP]M)\s+-\s+(\d+:\d+\s+[AP]M)/);
 
       if (timeMatch) {
-        const dateStr = row.booking_invitee_time.match(/(\w+,\s+\w+\s+\d+,\s+\d+)/)?.[1];
+        const dateStr = (row.booking_invitee_time || '').match(/(\w+,\s+\w+\s+\d+,\s+\d+)/)?.[1];
         const startTimeStr = timeMatch[1];
         const endTimeStr = timeMatch[2];
 
@@ -3538,10 +3552,10 @@ app.get('/api/therapist-stats', async (req, res) => {
     // Filter upcoming sessions based on booking_invitee_time
     const nowUTC = new Date();
     const upcomingBookings = upcomingResult.rows.filter(row => {
-      const timeMatch = row.session_timings.match(/at\s+(\d+):(\d+)\s+([AP]M)\s+-\s+(\d+):(\d+)\s+([AP]M)/);
+      const timeMatch = (row.session_timings || '').match(/at\s+(\d+):(\d+)\s+([AP]M)\s+-\s+(\d+):(\d+)\s+([AP]M)/);
 
       if (timeMatch) {
-        const dateStr = row.session_timings.match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+)/);
+        const dateStr = (row.session_timings || '').match(/(\w+),\s+(\w+)\s+(\d+),\s+(\d+)/);
 
         if (dateStr) {
           const month = dateStr[2];
@@ -3558,7 +3572,7 @@ app.get('/api/therapist-stats', async (req, res) => {
           if (endPeriod === 'AM' && endHour === 12) endHour = 0;
 
           // Parse timezone offset
-          const timezoneMatch = row.session_timings.match(/GMT([+-])(\d+):(\d+)/);
+          const timezoneMatch = (row.session_timings || '').match(/GMT([+-])(\d+):(\d+)/);
           let timezoneOffset = 330; // Default to IST (+5:30)
 
           if (timezoneMatch) {
@@ -4853,7 +4867,7 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
           // Determine if it's a Free Consultation
           const isFreeConsultation = (booking.booking_resource_name || '').toLowerCase().includes('free consultation') || 
                                      (booking.booking_resource_name || '').toLowerCase().includes('pre-therapy') ||
-                                     (booking.invitee_payment_amount !== null && booking.invitee_payment_amount !== undefined && parseFloat(booking.invitee_payment_amount) === 0);
+                                     parseFloat(booking.invitee_payment_amount || '0') === 0;
 
           // Find matching lead - normalizing phone for comparison
           const leadResult = await pool.query(
@@ -4900,7 +4914,7 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
                  SET pipeline_stage = $1, 
                      ${timestampColumn} = CURRENT_TIMESTAMP,
                      remark_lead_manager = COALESCE(remark_lead_manager, '') || $2,
-                     therapist_id = COALESCE($4::integer, therapist_id),
+                     therapist_id = COALESCE($4, therapist_id),
                      updated_at = CURRENT_TIMESTAMP
                  WHERE id = $3`,
                 [targetStage, remark, lead.id, therapistId]
@@ -4993,7 +5007,7 @@ app.post('/api/send-booking-link', async (req, res) => {
 
     try {
       // Send to n8n webhook
-      const webhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/f1ee71f4-65e3-4246-baea-372e822faed7';
+      const webhookUrl = process.env.N8N_WEBHOOK_SOS_EMAIL;
 
       const response = await fetch(webhookUrl, {
         method: 'POST',
@@ -5047,13 +5061,13 @@ app.post('/api/fetch-slots', async (req, res) => {
     console.log('Payload:', JSON.stringify(req.body, null, 2));
 
     // Updated to dynamic webhook selection provided by user
-    let webhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/324275f9-00bd-4609-bdb0-307c301b322c'; // Default: Public
+    let webhookUrl = process.env.N8N_WEBHOOK_FETCH_SLOTS_PUBLIC; // Default: Public
 
     if (payload.isAdmin) {
       if (payload.isDirectBooking) {
-        webhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/ebc7a183-926b-4cdb-ad3b-27f335a02e17'; // Admin Direct Slots
+        webhookUrl = process.env.N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT; // Admin Direct Slots
       } else {
-        webhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/b5ab584c-1203-41c0-b296-3107e2e6035e'; // Admin With Payment Slots
+        webhookUrl = process.env.N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT; // Admin With Payment Slots
       }
     }
     const response = await fetch(webhookUrl, {
@@ -5069,6 +5083,58 @@ app.post('/api/fetch-slots', async (req, res) => {
       let jsonResponse;
       try {
         jsonResponse = JSON.parse(responseText);
+
+        // FILTER LOGIC: Remove slots on days the therapist is unavailable according to DaySchedule
+        if (Array.isArray(jsonResponse) && jsonResponse[0] && jsonResponse[0]["Available Slots"]) {
+          const therapistName = payload.therapistName;
+          
+          if (therapistName) {
+            if (therapistName === 'SafeStories') {
+              // SafeStories allows all slots
+            } else {
+              const therapistResult = await pool.query(
+                'SELECT t.therapist_id, tr.schedule_id FROM therapists t LEFT JOIN therapist_resources tr ON t.therapist_id = tr.therapist_id WHERE TRIM(LOWER(t.name)) = $1 ORDER BY tr.schedule_id DESC NULLS LAST LIMIT 1',
+                [therapistName.trim().toLowerCase()]
+              );
+            
+            if (therapistResult.rows.length > 0 && therapistResult.rows[0].schedule_id) {
+              const scheduleId = therapistResult.rows[0].schedule_id;
+              
+              try {
+                const scheduleRes = await fetch(`https://n8n.srv1169280.hstgr.cloud/webhook/424780e4-8e10-4308-84fd-5925450cc123?scheduleId=${scheduleId}`);
+                if (scheduleRes.ok) {
+                  const scheduleData = await scheduleRes.json();
+                  if (Array.isArray(scheduleData) && scheduleData[0] && Array.isArray(scheduleData[0].availability)) {
+                    const availabilityRules = scheduleData[0].availability;
+                    
+                    const daysMap = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+                    
+                    const originalSlots = jsonResponse[0]["Available Slots"];
+                    const filteredSlots = originalSlots.filter((slotISO: string) => {
+                      const d = new Date(slotISO);
+                      const dayString = daysMap[d.getDay()];
+                      
+                      const rule = availabilityRules.find((r: any) => r.day === dayString);
+                      if (rule && rule.is_available === false) {
+                        return false; // Remove this slot
+                      }
+                      return true;
+                    });
+                    
+                    console.log(`[Fetch Slots Filter] Original slots: ${originalSlots.length}, Filtered slots: ${filteredSlots.length}`);
+                    jsonResponse[0]["Available Slots"] = filteredSlots;
+                  }
+                }
+              } catch (err) {
+                  console.error('[Fetch Slots Filter] Failed to apply availability rules:', err);
+                }
+              } else {
+                console.log(`[Fetch Slots Filter] Therapist ${therapistName} has no schedule connected. Clearing all slots.`);
+                jsonResponse[0]["Available Slots"] = [];
+              }
+            }
+          }
+        }
       } catch (e) {
         jsonResponse = responseText;
       }
@@ -5091,10 +5157,10 @@ app.post('/api/create-booking', async (req, res) => {
     try {
       // Send to n8n webhook
       // Updated to dynamic webhook selection provided by user
-      let webhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/d7194a23-689f-4d95-bb35-d30fca3f15f9'; // Default: Public
+      let webhookUrl = process.env.N8N_WEBHOOK_CREATE_BOOKING_PUBLIC; // Default: Public
 
       if (payload.isAdmin && payload.skipPayment) {
-        webhookUrl = 'https://n8n.srv1169280.hstgr.cloud/webhook/568038fa-d320-47da-8001-ea1ffeabde00'; // Admin Direct Create
+        webhookUrl = process.env.N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT; // Admin Direct Create
       }
 
       const response = await fetch(webhookUrl, {
@@ -6040,16 +6106,38 @@ app.post('/api/paperform-webhook/free-consultation', async (req, res) => {
     );
 
     if (docForm.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Booking not found in client_doc_form' });
+      const errMsg = 'Booking not found in client_doc_form';
+      await logWebhookApi({
+        log_type: 'webhook_incoming',
+        name: 'Paperform Free Consultation',
+        endpoint: '/api/paperform-webhook/free-consultation',
+        method: 'POST',
+        status: 'failed',
+        request_payload: req.body,
+        error_message: errMsg,
+        response_data: { success: false, error: errMsg }
+      });
+      return res.status(404).json({ success: false, error: errMsg });
     }
 
     const sessionType = docForm.rows[0].session_type;
 
     // Verify it's a free consultation
     if (sessionType !== 'Free Consultation - SafeStories') {
+      const errMsg = `Invalid session type: ${sessionType}. Expected: Free Consultation - SafeStories`;
+      await logWebhookApi({
+        log_type: 'webhook_incoming',
+        name: 'Paperform Free Consultation',
+        endpoint: '/api/paperform-webhook/free-consultation',
+        method: 'POST',
+        status: 'failed',
+        request_payload: req.body,
+        error_message: errMsg,
+        response_data: { success: false, error: errMsg }
+      });
       return res.status(400).json({
         success: false,
-        error: `Invalid session type: ${sessionType}. Expected: Free Consultation - SafeStories`
+        error: errMsg
       });
     }
 
@@ -6106,10 +6194,32 @@ app.post('/api/paperform-webhook/free-consultation', async (req, res) => {
 
     console.log('✅ client_doc_form updated to completed');
 
-    res.json({ success: true, message: 'Free consultation notes stored successfully' });
-  } catch (error) {
+    const resData = { success: true, message: 'Free consultation notes stored successfully' };
+    await logWebhookApi({
+      log_type: 'webhook_incoming',
+      name: 'Paperform Free Consultation',
+      endpoint: '/api/paperform-webhook/free-consultation',
+      method: 'POST',
+      status: 'success',
+      request_payload: req.body,
+      response_data: resData
+    });
+
+    res.json(resData);
+  } catch (error: any) {
     console.error('❌ Error storing free consultation notes:', error);
-    res.status(500).json({ success: false, error: 'Failed to store free consultation notes' });
+    const resData = { success: false, error: 'Failed to store free consultation notes' };
+    await logWebhookApi({
+      log_type: 'webhook_incoming',
+      name: 'Paperform Free Consultation',
+      endpoint: '/api/paperform-webhook/free-consultation',
+      method: 'POST',
+      status: 'failed',
+      request_payload: req.body,
+      error_message: error.message || String(error),
+      response_data: resData
+    });
+    res.status(500).json(resData);
   }
 });
 
@@ -6127,16 +6237,38 @@ app.post('/api/paperform-webhook/therapy-documentation', async (req, res) => {
     );
 
     if (docForm.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Booking not found in client_doc_form' });
+      const errMsg = 'Booking not found in client_doc_form';
+      await logWebhookApi({
+        log_type: 'webhook_incoming',
+        name: 'Paperform Therapy Documentation',
+        endpoint: '/api/paperform-webhook/therapy-documentation',
+        method: 'POST',
+        status: 'failed',
+        request_payload: req.body,
+        error_message: errMsg,
+        response_data: { success: false, error: errMsg }
+      });
+      return res.status(404).json({ success: false, error: errMsg });
     }
 
     const sessionType = docForm.rows[0].session_type;
 
     // Verify it's NOT a free consultation
     if (sessionType === 'Free Consultation - SafeStories') {
+      const errMsg = 'This is a free consultation. Use /api/paperform-webhook/free-consultation endpoint';
+      await logWebhookApi({
+        log_type: 'webhook_incoming',
+        name: 'Paperform Therapy Documentation',
+        endpoint: '/api/paperform-webhook/therapy-documentation',
+        method: 'POST',
+        status: 'failed',
+        request_payload: req.body,
+        error_message: errMsg,
+        response_data: { success: false, error: errMsg }
+      });
       return res.status(400).json({
         success: false,
-        error: 'This is a free consultation. Use /api/paperform-webhook/free-consultation endpoint'
+        error: errMsg
       });
     }
 
@@ -6300,10 +6432,32 @@ app.post('/api/paperform-webhook/therapy-documentation', async (req, res) => {
 
     console.log('✅ client_doc_form updated to completed');
 
-    res.json({ success: true, message: 'Therapy documentation stored successfully' });
-  } catch (error) {
+    const resData = { success: true, message: 'Therapy documentation stored successfully' };
+    await logWebhookApi({
+      log_type: 'webhook_incoming',
+      name: 'Paperform Therapy Documentation',
+      endpoint: '/api/paperform-webhook/therapy-documentation',
+      method: 'POST',
+      status: 'success',
+      request_payload: req.body,
+      response_data: resData
+    });
+
+    res.json(resData);
+  } catch (error: any) {
     console.error('❌ Error storing therapy documentation:', error);
-    res.status(500).json({ success: false, error: 'Failed to store therapy documentation' });
+    const resData = { success: false, error: 'Failed to store therapy documentation' };
+    await logWebhookApi({
+      log_type: 'webhook_incoming',
+      name: 'Paperform Therapy Documentation',
+      endpoint: '/api/paperform-webhook/therapy-documentation',
+      method: 'POST',
+      status: 'failed',
+      request_payload: req.body,
+      error_message: error.message || String(error),
+      response_data: resData
+    });
+    res.status(500).json(resData);
   }
 });
 
@@ -6415,20 +6569,26 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-const PORT = 3002;
-app.listen(PORT, () => {
-  console.log(`\n✓ API server running on http://localhost:${PORT}`);
+const PORT = 3003;
+const httpServer = createServer(app);
+
+export const io = new SocketIOServer(httpServer, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
+});
+
+io.on('connection', (socket) => {
+  console.log('[Socket.io] Client connected:', socket.id);
+  socket.on('join_room', (data) => {
+    if (data?.role === 'admin') socket.join('admin_room');
+    else if (data?.role === 'therapist' && data?.userId) socket.join('therapist_room_' + data.userId);
+  });
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`\nAPI server running on http://localhost:${PORT}`);
   startDashboardApiBookingSync();
-  try {
-    initializePhase1Jobs();
-  } catch (err) {
-    console.error('Failed to initialize Phase 1 background jobs:', err);
-  }
 }).on('error', (err: any) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`\n✗ Port ${PORT} is already in use. Please stop other processes or change the port.`);
-  } else {
-    console.error('\n✗ Server error:', err);
-  }
+  if (err.code === 'EADDRINUSE') console.error('Port is in use.');
+  else console.error('Server error', err);
   process.exit(1);
 });

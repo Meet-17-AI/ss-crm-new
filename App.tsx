@@ -31,9 +31,8 @@ const renderPublicRoute = (path: string) => {
 };
 
 const getPathForRole = (user: any): string => {
-  if (user?.role === 'sales') return '/crm';
   if (user?.role === 'therapist') return '/therapist';
-  return '/';
+  return '/crm';
 };
 
 const loadSavedUser = () => {
@@ -119,11 +118,8 @@ const App: React.FC = () => {
       window.history.replaceState({}, '', correctPath);
     }
 
-    if (role === 'sales') {
-      return <CRMApp user={user} onLogout={handleLogout} />;
-    }
     if (role === 'therapist') return <TherapistDashboard onLogout={handleLogout} user={user} />;
-    return <Dashboard onLogout={handleLogout} user={user} />;
+    return <CRMApp user={user} onLogout={handleLogout} />;
   }
 
   // Login page

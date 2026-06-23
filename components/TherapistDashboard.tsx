@@ -123,6 +123,7 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
   const [clientViewTab, setClientViewTab] = useState<'overview' | 'sessions' | 'documents' | 'caseHistory' | 'progressNotes' | 'goalTracking'>('overview');
   const [isCaseHistoryVisible, setIsCaseHistoryVisible] = useState(false);
   const [caseHistoryData, setCaseHistoryData] = useState<any>(null);
+  const [pretherapyData, setPretherapyData] = useState<any>(null);
   const [showCaseHistoryPasswordModal, setShowCaseHistoryPasswordModal] = useState(false);
 
   // Bulk action states
@@ -321,6 +322,7 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
     setShowCalendarView(false);
     setIsCaseHistoryVisible(false);
     setCaseHistoryData(null);
+    setPretherapyData(null);
     setShowCaseHistoryPasswordModal(false);
     setCaseHistoryPassword('');
     setCaseHistoryPasswordError('');
@@ -370,7 +372,10 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
         try {
           const chRes = await fetch(`/api/case-history?client_id=${encodeURIComponent(selectedClient.client_phone)}`);
           const chData = await chRes.json();
-          if (chData.success) setCaseHistoryData(chData.data);
+          if (chData.success) {
+            setCaseHistoryData(chData.data);
+            setPretherapyData(chData.pretherapy);
+          }
         } catch (e) {
           console.error('Failed to fetch case history', e);
         }
@@ -2398,12 +2403,12 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                     <h3 className="text-sm font-semibold text-gray-600">
                       {clientSessionType.hasPaidSessions ? 'Case History:' : 'Pre-therapy Notes:'}
                     </h3>
-                    {clientSessionType.hasPaidSessions && (
+                    {(clientSessionType.hasPaidSessions || clientSessionType.hasFreeConsultation) && (
                       <div className="flex gap-2">
                         <button
                           onClick={handleCaseHistoryView}
                           className="p-1.5 hover:bg-gray-200 rounded transition-colors"
-                          title={isCaseHistoryVisible ? "Hide Case History" : "View Case History"}
+                          title={isCaseHistoryVisible ? "Hide Clinical Notes" : "View Clinical Notes"}
                         >
                           {isCaseHistoryVisible ? (
                             <Eye size={16} className="text-gray-600" />
@@ -2411,47 +2416,91 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                             <EyeOff size={16} className="text-gray-600" />
                           )}
                         </button>
-                        <button
-                          disabled={!isCaseHistoryVisible}
-                          className={`p-1.5 rounded transition-colors ${isCaseHistoryVisible
-                            ? 'hover:bg-gray-200 cursor-pointer'
-                            : 'cursor-not-allowed opacity-40'
-                            }`}
-                          title={isCaseHistoryVisible ? "Edit Case History" : "View case history first to edit"}
-                        >
-                          <Edit size={16} className="text-gray-600" />
-                        </button>
+                        {clientSessionType.hasPaidSessions && (
+                          <button
+                            disabled={!isCaseHistoryVisible}
+                            className={`p-1.5 rounded transition-colors ${isCaseHistoryVisible
+                              ? 'hover:bg-gray-200 cursor-pointer'
+                              : 'cursor-not-allowed opacity-40'
+                              }`}
+                            title={isCaseHistoryVisible ? "Edit Case History" : "View case history first to edit"}
+                          >
+                            <Edit size={16} className="text-gray-600" />
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
                   <div className="border rounded-lg p-4 bg-gray-50 min-h-[100px]">
-                    {clientSessionType.hasPaidSessions ? (
-                      // Show case history for paid sessions
-                      isCaseHistoryVisible ? (
-                        caseHistoryData ? (
-                          <div className="space-y-2 text-sm text-gray-700">
-                            {caseHistoryData.age && <p><span className="font-medium">Age:</span> {caseHistoryData.age}</p>}
-                            {caseHistoryData.gender_identity && <p><span className="font-medium">Gender:</span> {caseHistoryData.gender_identity}</p>}
-                            {caseHistoryData.presenting_concerns && <p><span className="font-medium">Presenting Concerns:</span> {caseHistoryData.presenting_concerns}</p>}
-                            {caseHistoryData.medical_history && <p><span className="font-medium">Medical History:</span> {caseHistoryData.medical_history}</p>}
-                            {caseHistoryData.previous_mental_health && <p><span className="font-medium">Previous Mental Health:</span> {caseHistoryData.previous_mental_health}</p>}
-                            {caseHistoryData.insight_level && <p><span className="font-medium">Insight Level:</span> {caseHistoryData.insight_level}</p>}
-                            {!caseHistoryData.age && !caseHistoryData.presenting_concerns && (
-                              <p className="text-gray-400 italic">Case history form not yet filled</p>
-                            )}
+                    {isCaseHistoryVisible ? (
+                      <div>
+                        {/* Display Pre-therapy notes if present */}
+                        {pretherapyData ? (
+                          <div className="mb-4 pb-4 border-b border-gray-200">
+                            <h4 className="text-xs font-semibold text-teal-800 uppercase tracking-wider mb-2">Pre-Therapy Consultation Notes</h4>
+                            <div className="space-y-2 text-sm text-gray-700 bg-teal-50/50 p-3 rounded-md border border-teal-100">
+                              {pretherapyData.pre_therapy_notes && (
+                                <p><span className="font-medium text-teal-900">Clinical Notes:</span> {pretherapyData.pre_therapy_notes}</p>
+                              )}
+                              {pretherapyData.therapy && (
+                                <p><span className="font-medium text-teal-900">Therapy Recommendation:</span> {pretherapyData.therapy}</p>
+                              )}
+                              {pretherapyData.fields && Object.keys(pretherapyData.fields).length > 0 && (
+                                <details className="mt-2 text-xs">
+                                  <summary className="cursor-pointer text-teal-700 hover:text-teal-900 font-medium select-none">
+                                    View Full Consultation Form Details
+                                  </summary>
+                                  <div className="mt-2 space-y-1 pl-2 border-l-2 border-teal-200 text-gray-600 max-h-48 overflow-y-auto">
+                                    {Object.entries(pretherapyData.fields).map(([key, val]: [string, any]) => {
+                                      if (!val || (Array.isArray(val) && val.length === 0)) return null;
+                                      const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                                      let displayVal = val;
+                                      if (Array.isArray(val)) {
+                                        displayVal = val.join(', ');
+                                      } else if (typeof val === 'object') {
+                                        displayVal = JSON.stringify(val);
+                                      }
+                                      return (
+                                        <p key={key}>
+                                          <span className="font-medium">{label}:</span> {displayVal}
+                                        </p>
+                                      );
+                                    })}
+                                  </div>
+                                </details>
+                              )}
+                            </div>
                           </div>
                         ) : (
-                          <p className="text-gray-400 text-sm italic">No case history found. Fill the session form to add.</p>
-                        )
-                      ) : (
-                        <div className="flex items-center justify-center h-20">
-                          <p className="text-gray-400 text-sm">Case history is hidden. Click the eye icon to view.</p>
-                        </div>
-                      )
+                          !clientSessionType.hasPaidSessions && (
+                            <p className="text-gray-400 text-sm italic">No pre-therapy consultation notes found.</p>
+                          )
+                        )}
+
+                        {/* Display case history for paid sessions */}
+                        {clientSessionType.hasPaidSessions && (
+                          <div>
+                            {caseHistoryData ? (
+                              <div className="space-y-2 text-sm text-gray-700">
+                                {caseHistoryData.age && <p><span className="font-medium">Age:</span> {caseHistoryData.age}</p>}
+                                {caseHistoryData.gender_identity && <p><span className="font-medium">Gender:</span> {caseHistoryData.gender_identity}</p>}
+                                {caseHistoryData.presenting_concerns && <p><span className="font-medium">Presenting Concerns:</span> {caseHistoryData.presenting_concerns}</p>}
+                                {caseHistoryData.medical_history && <p><span className="font-medium">Medical History:</span> {caseHistoryData.medical_history}</p>}
+                                {caseHistoryData.previous_mental_health && <p><span className="font-medium">Previous Mental Health:</span> {caseHistoryData.previous_mental_health}</p>}
+                                {caseHistoryData.insight_level && <p><span className="font-medium">Insight Level:</span> {caseHistoryData.insight_level}</p>}
+                                {!caseHistoryData.age && !caseHistoryData.presenting_concerns && (
+                                  <p className="text-gray-400 italic">Case history form not yet filled</p>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-gray-400 text-sm italic">No case history found. Fill the session form to add.</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     ) : (
-                      // Show message for free consultation only
                       <div className="flex items-center justify-center h-20">
-                        <p className="text-gray-400 text-sm">Pre-therapy notes will appear after consultation form is filled</p>
+                        <p className="text-gray-400 text-sm">Clinical details are hidden. Click the eye icon to view.</p>
                       </div>
                     )}
                   </div>

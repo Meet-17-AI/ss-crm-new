@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import './StageRemarkModal.css';
 
 interface PreTherapyFormData {
@@ -360,7 +361,9 @@ const PreTherapyCallFormModal: React.FC<Props> = ({ isOpen, leadName, fromStage,
             />
             {form.suicidal_thoughts === 'Yes' && (
               <div style={{ marginTop: 10, padding: 12, backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#991b1b', marginBottom: 8 }}>⚠️ Clinical Safety Assessment</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#991b1b', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <AlertTriangle size={14} /> Clinical Safety Assessment
+                </div>
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Any ongoing/current suicidal thoughts/attempt:</div>
                   <RadioGroup

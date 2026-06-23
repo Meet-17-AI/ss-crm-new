@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './StageRemarkModal.css'; // Reusing some modal styles
-import { Loader2 } from 'lucide-react';
+import { Loader2, ClipboardList, Maximize2 } from 'lucide-react';
 
 interface ToDoItem {
   id: string;
@@ -59,7 +59,7 @@ const ToDoModal: React.FC<ToDoModalProps> = ({ onViewLead, isFullPage = false, s
       {/* Header */}
       <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-white sticky top-0 z-10">
         <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800">
-          <span>📋</span> To-Do List {isFullPage && <span className="text-sm font-normal text-gray-500 ml-2">(Full View)</span>}
+          <ClipboardList className="w-5 h-5 text-teal-600" /> To-Do List {isFullPage && <span className="text-sm font-normal text-gray-500 ml-2">(Full View)</span>}
         </h2>
         {isFullPage ? (
           <button 
@@ -73,7 +73,7 @@ const ToDoModal: React.FC<ToDoModalProps> = ({ onViewLead, isFullPage = false, s
             onClick={() => setCurrentPage?.('full-todo')}
             className="px-4 py-1.5 bg-teal-50 text-[#21615D] border border-[#21615D] hover:bg-teal-100 rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1"
           >
-            <span className="text-base">⤢</span> View Full List
+            <Maximize2 className="w-3.5 h-3.5 text-[#21615D]" /> View Full List
           </button>
         )}
       </div>

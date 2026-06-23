@@ -22,3 +22,64 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Database files
+*.db
+*.sqlite
+
+# Scratch / temp
+scratch/
+
+# One-off debug/analysis scripts at root
+check_*.ts
+debug_*.ts
+analyze_*.ts
+find_*.ts
+verify_*.ts
+move_*.ts
+delete_*.ts
+create_test_*.ts
+test_*.ts
+research_*.ts
+get_all_*.ts
+comprehensive_*.ts
+show_*.ts
+
+# Batch / diagnostic scripts
+*.bat
+setup-crm-local.ps1
+DIAGNOSTIC_REPORT_DETAILED.txt
+FINAL_SUMMARY.txt
+NUMBERS_ONLY_SUMMARY.txt
+QUICK_START.txt
+server_log.txt
+
+# Loose markdown docs (not README)
+CLEANUP_*.md
+CODE_ANALYSIS_*.md
+COMPLETE_SUMMARY_*.md
+CRM_FEATURES_*.md
+CRM_IMPROVEMENT_*.md
+CRM_STYLING_*.md
+DEBUG_*.md
+DETAILED_*.md
+DIAGNOSE*.md
+FINAL_*.md
+FIX_*.md
+FRESH_*.md
+IMPLEMENTATION_*.md
+LEADS_*.md
+LOCAL_DEV*.md
+MASTER_PROMPT*.md
+MAY_JUNE_*.md
+PHASE1_*.md
+PHASE2_*.md
+PHASE3_*.md
+QUICK_*.md
+RUN_*.md
+SETUP_*.md
+SIMPLE_*.md
+START_*.md
+TROUBLESHOOTING_*.md
+TRULY_*.md
+UPDATE_*.md

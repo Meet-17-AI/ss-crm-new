@@ -8,6 +8,8 @@ import { convertToIST, formatISOToIST } from './_lib/timezone.js';
 import { startDashboardApiBookingSync } from './_lib/dashboardApiBookingSync.js';
 import { uploadFile } from './_lib/minio.js';
 import { sendOTPEmail, sendPasswordResetOTP } from './_lib/email.js';
+import phase1Router, { initializePhase1Jobs } from './phase1-routes.js';
+import phase2Router from './phase2-routes.js';
 
 // Configure multer for memory storage
 const upload = multer({ 
@@ -67,6 +69,9 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use('/api', phase1Router);
+app.use('/api', phase2Router);
+
 
 // Login endpoint
 app.post('/api/login', async (req, res) => {
@@ -5562,11 +5567,65 @@ app.get('/api/case-history', async (req, res) => {
       );
     }
 
-    if (result.rows.length === 0) {
-      return res.json({ success: true, data: null });
+    let pretherapy = null;
+    try {
+      let lookupId = client_id;
+      if (!lookupId && booking_id) {
+        const bookingQuery = await pool.query(
+          'SELECT invitee_email, invitee_phone FROM bookings WHERE booking_id = $1', 
+          [booking_id]
+        );
+        if (bookingQuery.rows.length > 0) {
+          lookupId = bookingQuery.rows[0].invitee_email || bookingQuery.rows[0].invitee_phone;
+        }
+      }
+
+      if (lookupId) {
+        const phoneOrEmail = String(lookupId);
+        const normalizedPhone = phoneOrEmail.replace(/[\s\-\(\)\+]/g, '');
+
+        const leadQuery = await pool.query(
+          `SELECT id, pre_therapy_notes, remark_pretherapy_call, pretherapy_done, therapy, status
+           FROM leads 
+           WHERE email = $1 
+              OR phone = $1 
+              OR REGEXP_REPLACE(phone, '[\\s\\-\\(\\)\\+]', '', 'g') = $2
+           LIMIT 1`,
+          [phoneOrEmail, normalizedPhone]
+        );
+
+        if (leadQuery.rows.length > 0) {
+          const lead = leadQuery.rows[0];
+          
+          const formFieldsRes = await pool.query(
+            `SELECT field_name, field_value FROM form_field_values
+             WHERE lead_id = $1 AND form_type = 'pretherapy_form'`,
+            [lead.id]
+          );
+          const fields = Object.fromEntries(
+            formFieldsRes.rows.map(r => [r.field_name, r.field_value])
+          );
+
+          pretherapy = {
+            lead_id: lead.id,
+            pre_therapy_notes: lead.pre_therapy_notes,
+            remark_pretherapy_call: lead.remark_pretherapy_call,
+            pretherapy_done: lead.pretherapy_done,
+            therapy: lead.therapy,
+            status: lead.status,
+            fields: fields
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching pretherapy data for case history:', e);
     }
 
-    res.json({ success: true, data: result.rows[0] });
+    res.json({ 
+      success: true, 
+      data: result.rows.length > 0 ? result.rows[0] : null,
+      pretherapy: pretherapy
+    });
   } catch (error) {
     console.error('Error fetching case history:', error);
     res.status(500).json({ error: 'Failed to fetch case history' });
@@ -6224,6 +6283,11 @@ const PORT = 3002;
 app.listen(PORT, () => {
   console.log(`\n✓ API server running on http://localhost:${PORT}`);
   startDashboardApiBookingSync();
+  try {
+    initializePhase1Jobs();
+  } catch (err) {
+    console.error('Failed to initialize Phase 1 background jobs:', err);
+  }
 }).on('error', (err: any) => {
   if (err.code === 'EADDRINUSE') {
     console.error(`\n✗ Port ${PORT} is already in use. Please stop other processes or change the port.`);

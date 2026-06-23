@@ -16,7 +16,7 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
   }
   const [sourceMonth, setSourceMonth] = useState(getCurrentMonth)
   const [funnelMonth, setFunnelMonth] = useState(getCurrentMonth)
-  const [statsMonth, setStatsMonth] = useState(getCurrentMonth)
+  const [statsMonth, setStatsMonth] = useState('All Time')
   const [totalLeads, setTotalLeads] = useState(0)
   const [dropouts, setDropouts] = useState(0)
   const [closed, setClosed] = useState(0)

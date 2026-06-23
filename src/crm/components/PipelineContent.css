@@ -408,3 +408,15 @@
   border: 2px dashed #0d9488;
   border-radius: 12px;
 }
+
+/* Duplicate lead card highlight */
+.lead-card.duplicate-card {
+  border-left: 5px solid #ef4444;
+}
+
+/* Inactive lead (no interaction in 24h) highlight */
+.lead-card.inactive-24h {
+  border: 1px solid #f87171 !important;
+  background-color: #fff5f5 !important;
+}
+
