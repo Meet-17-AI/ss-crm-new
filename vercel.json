@@ -1,7 +1,8 @@
 {
   "rewrites": [
-    { "source": "/api/sos-documentation", "destination": "/api/sos-documentation" },
-    { "source": "/api/:path*", "destination": "/api/index" },
+    { "source": "/api/sos-documentation", "destination": "https://YOUR_RENDER_URL.onrender.com/api/sos-documentation" },
+    { "source": "/api/crm/:path*", "destination": "https://YOUR_RENDER_URL.onrender.com/api/crm/:path*" },
+    { "source": "/api/:path*", "destination": "https://YOUR_RENDER_URL.onrender.com/api/:path*" },
     { "source": "/sos-view/:token", "destination": "/index.html" },
     { "source": "/((?!api).*)", "destination": "/index.html" }
   ],
