@@ -947,7 +947,7 @@ app.patch('/api/leads/:id/stage', async (req, res) => {
 
         // Create audit log for stage change
         try {
-          const leadData = result.rows[0];
+          const leadData: any = result.rows[0];
           const stageNames: Record<string, string> = {
             'lead-inquire': 'Lead Inquire',
             'followup-1': 'Follow Up',
