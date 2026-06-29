@@ -10,6 +10,7 @@ import { uploadFile } from './_lib/minio.js';
 import { sendOTPEmail, sendPasswordResetOTP } from './_lib/email.js';
 import phase1Router, { initializePhase1Jobs } from './phase1-routes.js';
 import phase2Router from './phase2-routes.js';
+import aisensyWebhookRouter from './aisensy-webhook.js';
 
 // Configure multer for memory storage
 const upload = multer({ 
@@ -71,6 +72,7 @@ app.use(cors({
 app.use(express.json());
 app.use('/api', phase1Router);
 app.use('/api', phase2Router);
+app.use('/api/webhooks', aisensyWebhookRouter);
 
 
 // Login endpoint
@@ -894,7 +896,7 @@ app.post('/api/leads/convert-virtual', async (req, res) => {
 
 app.patch('/api/leads/:id/stage', async (req, res) => {
     const { id } = req.params;
-    const { pipeline_stage, remark, follow_up_date } = req.body;
+    const { pipeline_stage, remark, follow_up_date, future_action } = req.body;
     if (!pipeline_stage) {
         return res.status(400).json({ error: 'pipeline_stage is required' });
     }
@@ -923,26 +925,33 @@ app.patch('/api/leads/:id/stage', async (req, res) => {
         }
 
         const timestampUpdate = tsCol ? `, ${tsCol} = NOW()` : '';
-        let query, values;
+        
+        let updateParts = ['pipeline_stage = $1'];
+        let values: any[] = [pipeline_stage];
+        let paramIdx = 2;
 
         if (remarkCol && remark) {
-            if (follow_up_date && pipeline_stage === 'followup-1') {
-                query = `UPDATE leads SET pipeline_stage = $1, ${remarkCol} = $2${timestampUpdate}, follow_up_1_date = $4, updated_at = NOW() WHERE id::text = $3 RETURNING *`;
-                values = [pipeline_stage, remark, id, follow_up_date];
-            } else {
-                query = `UPDATE leads SET pipeline_stage = $1, ${remarkCol} = $2${timestampUpdate}, updated_at = NOW() WHERE id::text = $3 RETURNING *`;
-                values = [pipeline_stage, remark, id];
-            }
-        } else {
-            if (follow_up_date && pipeline_stage === 'followup-1') {
-                query = `UPDATE leads SET pipeline_stage = $1${timestampUpdate}, follow_up_1_date = $3, updated_at = NOW() WHERE id::text = $2 RETURNING *`;
-                values = [pipeline_stage, id, follow_up_date];
-            } else {
-                query = `UPDATE leads SET pipeline_stage = $1${timestampUpdate}, updated_at = NOW() WHERE id::text = $2 RETURNING *`;
-                values = [pipeline_stage, id];
-            }
+            updateParts.push(`${remarkCol} = $${paramIdx}`);
+            values.push(remark);
+            paramIdx++;
         }
 
+        if (follow_up_date && pipeline_stage === 'followup-1') {
+            updateParts.push(`follow_up_1_date = $${paramIdx}`);
+            values.push(follow_up_date);
+            paramIdx++;
+        }
+
+        if (future_action !== undefined) {
+            updateParts.push(`future_action = $${paramIdx}`);
+            values.push(future_action);
+            paramIdx++;
+        }
+
+        updateParts.push('updated_at = NOW()');
+        values.push(id);
+        
+        const query = `UPDATE leads SET ${updateParts.join(', ')}${timestampUpdate} WHERE id::text = $${paramIdx} RETURNING *`;
         const result = await pool.query(query, values);
 
         // Create audit log for stage change
@@ -1013,6 +1022,7 @@ app.patch('/api/leads/:id', async (req, res) => {
             remark_closed: 'remark_closed',
             general_remarks: 'general_remarks',
             tags: 'tags',
+            future_action: 'future_action',
         };
 
         const setClauses: string[] = [];

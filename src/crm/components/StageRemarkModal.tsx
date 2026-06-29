@@ -6,7 +6,7 @@ interface StageRemarkModalProps {
     fromStage: string;
     toStage: string;
     leadName: string;
-    onConfirm: (remark: string, followUpDate?: string) => void;
+    onConfirm: (remark: string, followUpDate?: string, futureAction?: string) => void;
     onCancel: () => void;
 }
 
@@ -141,6 +141,7 @@ const StageRemarkModal: React.FC<StageRemarkModalProps> = ({
 }) => {
     const [remark, setRemark] = useState('');
     const [followUpDate, setFollowUpDate] = useState('');
+    const [futureAction, setFutureAction] = useState('');
     const [calOpen, setCalOpen] = useState(false);
     const [showError, setShowError] = useState(false);
     const calRef = useRef<HTMLDivElement>(null);
@@ -149,7 +150,7 @@ const StageRemarkModal: React.FC<StageRemarkModalProps> = ({
     const today = new Date().toISOString().split('T')[0];
 
     useEffect(() => {
-        if (isOpen) { setRemark(''); setFollowUpDate(''); setCalOpen(false); setShowError(false); }
+        if (isOpen) { setRemark(''); setFollowUpDate(''); setFutureAction(''); setCalOpen(false); setShowError(false); }
     }, [isOpen]);
 
     useEffect(() => {
@@ -167,7 +168,7 @@ const StageRemarkModal: React.FC<StageRemarkModalProps> = ({
 
     const handleConfirm = () => {
         if (!remark.trim()) { setShowError(true); return; }
-        onConfirm(remark.trim(), isFollowUp && followUpDate ? followUpDate : undefined);
+        onConfirm(remark.trim(), isFollowUp && followUpDate ? followUpDate : undefined, futureAction || undefined);
     };
 
     return (
@@ -186,6 +187,28 @@ const StageRemarkModal: React.FC<StageRemarkModalProps> = ({
                             <polyline points="12 5 19 12 12 19" />
                         </svg>
                         <span className="stage-badge to">{STAGE_LABELS[toStage] || toStage}</span>
+                    </div>
+                )}
+
+                {(toStage === 'followup-1' || toStage === 'pretherapy-call') && (
+                    <div style={{ marginBottom: '16px' }}>
+                        <label className="stage-remark-label" style={{ display: 'block', marginBottom: '6px' }}>
+                            Future Action <span style={{ color: '#6b7280', fontWeight: 400, fontSize: '12px' }}>(optional)</span>
+                        </label>
+                        <select
+                            value={futureAction}
+                            onChange={e => setFutureAction(e.target.value)}
+                            style={{
+                                width: '100%', padding: '10px 14px', border: '1.5px solid #d1d5db',
+                                borderRadius: '8px', fontSize: '14px', background: '#fff', cursor: 'pointer',
+                                color: futureAction ? '#111827' : '#9ca3af',
+                            }}
+                        >
+                            <option value="">Select action...</option>
+                            <option value="Call">Call</option>
+                            <option value="Email">Email</option>
+                            <option value="Text">Text</option>
+                        </select>
                     </div>
                 )}
 

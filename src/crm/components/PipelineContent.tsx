@@ -35,6 +35,7 @@ interface Lead {
   is_duplicate?: boolean
   pretherapy_completed?: boolean
   pretherapy_completed_at?: string
+  future_action?: string
 }
 
 interface Stage {
@@ -229,6 +230,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
               is_duplicate: d.is_duplicate,
               pretherapy_completed: d.pretherapy_completed,
               pretherapy_completed_at: d.pretherapy_completed_at,
+              future_action: d.future_action,
             };
           })
 
@@ -388,7 +390,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
     setPendingDrop({ lead, fromStageId, toStageId })
   }
 
-  const handleRemarkConfirm = async (remark: string, formData?: PreTherapyFormData, followUpDate?: string) => {
+  const handleRemarkConfirm = async (remark: string, formData?: PreTherapyFormData, followUpDate?: string, futureAction?: string) => {
     if (!pendingDrop) return
     const { lead, fromStageId, toStageId } = pendingDrop
 
@@ -418,6 +420,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
             ...lead,
             pipeline_stage: finalStageId,
             tags: finalTags,
+            future_action: futureAction || lead.future_action,
             consultation_outcome: formData?.consultation_outcome || lead.consultation_outcome,
             date: now, // refresh date so month filter and sort work immediately
           }]
@@ -431,7 +434,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
       const response = await fetch(`/api/leads/${lead.id}/stage`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pipeline_stage: toStageId, remark, ...(followUpDate ? { follow_up_date: followUpDate } : {}) }),
+        body: JSON.stringify({ pipeline_stage: toStageId, remark, ...(followUpDate ? { follow_up_date: followUpDate } : {}), ...(futureAction ? { future_action: futureAction } : {}) }),
       })
       if (!response.ok) throw new Error('Failed to update stage')
 
@@ -730,20 +733,36 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                           </div>
                         </div>
 
-                          {lead.tags && (
-                            <div className="lead-tags-container" style={{ marginBottom: 10 }}>
-                              <span className="lead-tag-badge" style={{ 
-                                background: '#f1f5f9', 
-                                color: '#475569', 
-                                padding: '2px 8px', 
-                                borderRadius: '4px', 
-                                fontSize: '10px',
-                                fontWeight: '600',
-                                textTransform: 'uppercase',
-                                border: '1px solid #e2e8f0'
-                              }}>
-                                {lead.tags}
-                              </span>
+                          {(lead.tags || lead.future_action) && (
+                            <div className="lead-tags-container" style={{ marginBottom: 10, display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {lead.tags && (
+                                <span className="lead-tag-badge" style={{ 
+                                  background: '#f1f5f9', 
+                                  color: '#475569', 
+                                  padding: '2px 8px', 
+                                  borderRadius: '4px', 
+                                  fontSize: '10px',
+                                  fontWeight: '600',
+                                  textTransform: 'uppercase',
+                                  border: '1px solid #e2e8f0'
+                                }}>
+                                  {lead.tags}
+                                </span>
+                              )}
+                              {lead.future_action && (
+                                <span className="lead-tag-badge" style={{ 
+                                  background: '#e0e7ff', 
+                                  color: '#4338ca', 
+                                  padding: '2px 8px', 
+                                  borderRadius: '4px', 
+                                  fontSize: '10px',
+                                  fontWeight: '600',
+                                  textTransform: 'uppercase',
+                                  border: '1px solid #c7d2fe'
+                                }}>
+                                  Action: {lead.future_action}
+                                </span>
+                              )}
                             </div>
                           )}
 

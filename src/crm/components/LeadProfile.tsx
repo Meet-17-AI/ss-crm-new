@@ -37,6 +37,7 @@ interface Lead {
     stage_closed_at?: string
     follow_up_1_date?: string
     tags?: string
+    future_action?: string
     remark_referred?: string
     remark_closed?: string
     remark_unresponsive?: string

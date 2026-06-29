@@ -92,7 +92,8 @@ export async function triggerSync(req: any, res: any) {
     if (syncType === 'booking_to_lead') {
       await syncBookingsToLeads(client, syncId);
     } else if (syncType === 'aisensy_to_lead') {
-      await syncAiensyToLeads(client, syncId);
+      // DISABLED: Replaced by direct Webhook in aisensy-webhook.ts
+      // await syncAiensyToLeads(client, syncId);
     }
 
     res.json({
@@ -517,13 +518,16 @@ export function startAutoSync() {
       await syncBookingsToLeads(client, syncId1);
 
       // 2. Sync Aisensy
+      // DISABLED: Replaced by direct Webhook in aisensy-webhook.ts
+      /*
       const syncLogResult2 = await client.query(
-        `INSERT INTO lead_sync_log (sync_type, started_at, status, created_by)
+        \`INSERT INTO lead_sync_log (sync_type, started_at, status, created_by)
          VALUES ('aisensy_to_lead', CURRENT_TIMESTAMP, 'pending', 'auto_sync_job')
-         RETURNING sync_id`
+         RETURNING sync_id\`
       );
       const syncId2 = syncLogResult2.rows[0].sync_id;
       await syncAiensyToLeads(client, syncId2);
+      */
 
       client.release();
       console.log(`Auto-sync completed successfully at ${new Date().toISOString()}`);
