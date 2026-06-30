@@ -1596,6 +1596,90 @@ app.get('/api/crm/todo', async (req, res) => {
   }
 });
 
+app.get('/api/crm/export', async (req, res) => {
+  try {
+    const { startDate, endDate, exportType } = req.query; // 'leads', 'pretherapy', or 'both'
+    
+    let leadQuery = `
+      SELECT 
+        l.name, l.phone, l.email, l.city, l.age, l.source, l.pipeline_stage, l.created_at,
+        COALESCE(sales.full_name, sales.name) as sales_agent_name,
+        COALESCE(therapists.full_name, therapists.name) as therapist_name,
+        ptcf.consultation_outcome
+      FROM leads l
+      LEFT JOIN users sales ON l.sales_agent_id::text = sales.id::text
+      LEFT JOIN users therapists ON (l.therapist_id::text = therapists.id::text OR l.therapist_id::text = therapists.therapist_id::text)
+      LEFT JOIN (
+          SELECT DISTINCT ON (lead_id) lead_id, consultation_outcome 
+          FROM pretherapy_call_forms 
+          ORDER BY lead_id, submitted_at DESC
+      ) ptcf ON l.id::text = ptcf.lead_id::text
+    `;
+    
+    let bookingQuery = `
+      SELECT 
+        invitee_name, invitee_phone, invitee_email, booking_host_name,
+        booking_resource_name, booking_status, booking_mode, booking_invitee_time,
+        invitee_created_at, booking_start_at
+      FROM bookings
+      WHERE booking_host_name ILIKE 'safestories'
+    `;
+
+    let leadParams: any[] = [];
+    let bookingParams: any[] = [];
+    let whereClausesLeads = [];
+    let whereClausesBookings = [];
+    let leadIdx = 1;
+    let bookingIdx = 1;
+
+    if (startDate) {
+      whereClausesLeads.push(`l.created_at >= $${leadIdx}`);
+      leadParams.push(startDate);
+      leadIdx++;
+
+      whereClausesBookings.push(`booking_start_at >= $${bookingIdx}`);
+      bookingParams.push(startDate);
+      bookingIdx++;
+    }
+    if (endDate) {
+      whereClausesLeads.push(`l.created_at <= $${leadIdx}`);
+      leadParams.push(`${endDate} 23:59:59`);
+      leadIdx++;
+
+      whereClausesBookings.push(`booking_start_at <= $${bookingIdx}`);
+      bookingParams.push(`${endDate} 23:59:59`);
+      bookingIdx++;
+    }
+
+    if (whereClausesLeads.length > 0) {
+      leadQuery += ' WHERE ' + whereClausesLeads.join(' AND ');
+    }
+    leadQuery += ' ORDER BY l.created_at DESC';
+
+    if (whereClausesBookings.length > 0) {
+      bookingQuery += ' AND ' + whereClausesBookings.join(' AND ');
+    }
+    bookingQuery += ' ORDER BY invitee_created_at DESC';
+
+    let leads = [];
+    let bookings = [];
+
+    if (exportType === 'leads' || exportType === 'both') {
+      const leadsRes = await pool.query(leadQuery, leadParams);
+      leads = leadsRes.rows;
+    }
+    if (exportType === 'pretherapy' || exportType === 'both') {
+      const bookingsRes = await pool.query(bookingQuery, bookingParams);
+      bookings = bookingsRes.rows;
+    }
+
+    res.json({ leads, bookings });
+  } catch (err) {
+    console.error('Error exporting CRM data:', err);
+    res.status(500).json({ error: 'Failed to export CRM data' });
+  }
+});
+
 // Update password
 app.post('/api/update-password', async (req, res) => {
   try {

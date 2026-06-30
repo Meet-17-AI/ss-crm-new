@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import MonthFilter from './MonthFilter'
 import { Loader } from '../../../components/Loader'
 import ToDoModal from './ToDoModal'
+import { ExportModal } from './ExportModal'
+import { Download } from 'lucide-react'
 
 interface DashboardContentProps {
   currentUser?: any
@@ -17,6 +19,7 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
   const [sourceMonth, setSourceMonth] = useState(getCurrentMonth)
   const [funnelMonth, setFunnelMonth] = useState(getCurrentMonth)
   const [statsMonth, setStatsMonth] = useState('All Time')
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false)
   const [totalLeads, setTotalLeads] = useState(0)
   const [dropouts, setDropouts] = useState(0)
   const [closed, setClosed] = useState(0)
@@ -152,13 +155,22 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
             <h1 className="text-3xl font-bold mb-1">Analytics</h1>
             <p className="text-gray-600 text-sm">Welcome {currentUser?.full_name || currentUser?.name || 'User'}, to SafeStories CRM Analytics!</p>
           </div>
-          <MonthFilter selectedMonth={statsMonth} onChange={setStatsMonth} />
+          <div className="flex items-center gap-4">
+            <MonthFilter selectedMonth={statsMonth} onChange={setStatsMonth} />
+            <button
+              onClick={() => setIsExportModalOpen(true)}
+              className="flex items-center px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export to Excel
+            </button>
+          </div>
         </div>
       </header>
 
       <div className="pl-8 pr-8 pb-8">
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           {modules.map((module) => (
             <div key={module.id} className="bg-white rounded-xl shadow-sm border border-gray-100 transition-shadow hover:shadow-md p-6">
               <div className="text-sm text-gray-600 mb-2">{module.title}</div>
@@ -166,6 +178,11 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
             </div>
           ))}
         </div>
+
+        <ExportModal 
+          isOpen={isExportModalOpen} 
+          onClose={() => setIsExportModalOpen(false)} 
+        />
 
         <ToDoModal 
           setCurrentPage={setCurrentPage}
