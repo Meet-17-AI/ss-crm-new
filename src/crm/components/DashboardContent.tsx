@@ -20,6 +20,8 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
   const [totalLeads, setTotalLeads] = useState(0)
   const [dropouts, setDropouts] = useState(0)
   const [closed, setClosed] = useState(0)
+  const [referred, setReferred] = useState(0)
+  const [pretherapyBooked, setPretherapyBooked] = useState(0)
   const [conversionCount, setConversionCount] = useState(0)
   const [leadSources, setLeadSources] = useState([
     { name: 'Chatbot', value: 0 },
@@ -53,6 +55,8 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
           setTotalLeads(data.totalLeads)
           if (data.dropouts !== undefined) setDropouts(data.dropouts)
           if (data.closed !== undefined) setClosed(data.closed)
+          if (data.referred !== undefined) setReferred(data.referred)
+          if (data.pretherapyBooked !== undefined) setPretherapyBooked(data.pretherapyBooked)
           if (data.allTimeBookedCount !== undefined) setConversionCount(data.allTimeBookedCount)
           if (data.sources) {
             const standardSources = [
@@ -120,10 +124,12 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
   }, [sourceMonth, funnelMonth, statsMonth])
 
   const modules = [
-    { id: 1, title: 'Total Leads', value: totalLeads.toString() },
-    { id: 2, title: 'Lead to first session conversion', value: conversionCount.toString() },
-    { id: 3, title: 'Unresponsive', value: dropouts.toString() },
-    { id: 4, title: 'Closed', value: closed.toString() },
+    { id: 1, title: 'Leads', value: totalLeads.toString() },
+    { id: 2, title: 'Pre-therapy Booked', value: pretherapyBooked.toString() },
+    { id: 3, title: 'Booked First Session', value: conversionCount.toString() },
+    { id: 4, title: 'Unresponsive', value: dropouts.toString() },
+    { id: 5, title: 'Closed', value: closed.toString() },
+    { id: 6, title: 'Referred', value: referred.toString() },
   ]
 
   const leadSourcesData = leadSources;
@@ -152,7 +158,7 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
 
       <div className="pl-8 pr-8 pb-8">
         {/* Stats Grid */}
-        <div className="grid grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
           {modules.map((module) => (
             <div key={module.id} className="bg-white rounded-xl shadow-sm border border-gray-100 transition-shadow hover:shadow-md p-6">
               <div className="text-sm text-gray-600 mb-2">{module.title}</div>

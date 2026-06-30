@@ -1639,19 +1639,39 @@ app.get('/api/analytics', async (req, res) => {
       stageMonthParams
     );
 
+    const allTimeReferredRes = await pool.query(
+      `SELECT COUNT(*) as count FROM leads WHERE pipeline_stage = 'referred' ${buildStageFilter('stage_referred_at')}`,
+      stageMonthParams
+    );
+
+    let pretherapyBookingsParams: any[] = [];
+    let pretherapyBookingsFilter = '';
+    if (stageMonthParams.length === 2) {
+      pretherapyBookingsFilter = `AND EXTRACT(MONTH FROM booking_start_at) = $1 AND EXTRACT(YEAR FROM booking_start_at) = $2`;
+      pretherapyBookingsParams = stageMonthParams;
+    }
+    const pretherapyBookingsRes = await pool.query(
+      `SELECT COUNT(*) as count FROM bookings WHERE booking_host_name ILIKE 'safestories' ${pretherapyBookingsFilter}`,
+      pretherapyBookingsParams
+    );
+
     const dropoutsCount = allTimeDropoutsRes.rows[0].count;
     const leaksCount = allTimeLeaksRes.rows[0].count;
     const closedCount = parseInt(allTimeClosedRes.rows[0].count);
     const totalLeadsCount = parseInt(totalLeadsRes.rows[0].count);
     const allTimeBookedCount = parseInt(allTimeBookedRes.rows[0].count);
+    const referredCount = parseInt(allTimeReferredRes.rows[0].count);
+    const pretherapyBookedCount = parseInt(pretherapyBookingsRes.rows[0].count);
     // Calculate all-time conversion rate for the stat cards
     const allTimeConversionRate = totalLeadsCount > 0 ? Math.round((allTimeBookedCount / totalLeadsCount) * 100) : 0;
 
     res.json({
-      totalLeads: parseInt(totalLeadsRes.rows[0].count),
+      totalLeads: totalLeadsCount,
       dropouts: parseInt(dropoutsCount),
       leaks: parseInt(leaksCount),
       closed: closedCount,
+      referred: referredCount,
+      pretherapyBooked: pretherapyBookedCount,
       allTimeConversionRate,
       allTimeBookedCount,
       sources: sourcesRes.rows.map(row => ({ name: row.name, value: parseInt(row.value) })),
