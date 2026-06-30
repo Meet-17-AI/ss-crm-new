@@ -1534,7 +1534,7 @@ app.get('/api/analytics', async (req, res) => {
         let pretherapyBookingsParams: any[] = [];
         let pretherapyBookingsFilter = '';
         if (stageMonthParams.length === 2) {
-          pretherapyBookingsFilter = `AND EXTRACT(MONTH FROM invitee_created_at) = $1 AND EXTRACT(YEAR FROM invitee_created_at) = $2`;
+          pretherapyBookingsFilter = `AND EXTRACT(MONTH FROM COALESCE(invitee_created_at, booking_start_at)) = $1 AND EXTRACT(YEAR FROM COALESCE(invitee_created_at, booking_start_at)) = $2`;
           pretherapyBookingsParams = stageMonthParams;
         }
         const pretherapyBookingsRes = await pool.query(
