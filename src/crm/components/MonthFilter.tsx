@@ -10,14 +10,14 @@ const MonthFilter = ({ selectedMonth, onChange }: MonthFilterProps) => {
   const [isOpen, setIsOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // Generate months from Oct 2025 to current month + 1
+  // Generate months from Jan 2024 to current month
   const generateMonths = () => {
     const months: string[] = []
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December']
-    const start = new Date(2025, 9, 1) // Oct 2025
+    const start = new Date(2024, 0, 1) // Jan 2024
     const now = new Date()
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    const end = new Date(now.getFullYear(), now.getMonth(), 1)
     for (let d = new Date(end); d >= start; d.setMonth(d.getMonth() - 1)) {
       months.push(`${monthNames[d.getMonth()]} ${d.getFullYear()}`)
     }
