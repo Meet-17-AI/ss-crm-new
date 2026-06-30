@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Download, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import MonthFilter from './MonthFilter';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -8,9 +9,12 @@ interface ExportModalProps {
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [exportType, setExportType] = useState('both');
+  const getCurrentMonth = () => {
+    const now = new Date();
+    return `${now.toLocaleString('en-US', { month: 'long' })} ${now.getFullYear()}`;
+  };
+  
+  const [exportMonth, setExportMonth] = useState(getCurrentMonth());
   const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,74 +26,43 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
       setError(null);
 
       const queryParams = new URLSearchParams();
-      if (startDate) queryParams.append('startDate', startDate);
-      if (endDate) queryParams.append('endDate', endDate);
-      if (exportType) queryParams.append('exportType', exportType);
+      if (exportMonth && exportMonth !== 'All Time') {
+        queryParams.append('statsMonth', exportMonth);
+      }
 
-      const response = await fetch(`/api/crm/export?${queryParams.toString()}`);
+      const response = await fetch(`/api/analytics?${queryParams.toString()}`);
       if (!response.ok) {
-        throw new Error('Failed to fetch export data');
+        throw new Error('Failed to fetch KPI analytics data');
       }
 
       const data = await response.json();
       const wb = XLSX.utils.book_new();
 
-      if (data.leads && data.leads.length > 0) {
-        const leadHeaders = [
-          'Name', 'Phone', 'Email', 'City', 'Age', 'Source', 
-          'Pipeline Stage', 'Created At', 'Sales Agent', 
-          'Therapist', 'Consultation Outcome'
-        ];
-        const leadRows = data.leads.map((l: any) => [
-          l.name || '',
-          l.phone || '',
-          l.email || '',
-          l.city || '',
-          l.age || '',
-          l.source || '',
-          l.pipeline_stage || '',
-          l.created_at ? new Date(l.created_at).toLocaleString() : '',
-          l.sales_agent_name || '',
-          l.therapist_name || '',
-          l.consultation_outcome || ''
-        ]);
-        const wsLeads = XLSX.utils.aoa_to_sheet([leadHeaders, ...leadRows]);
-        XLSX.utils.book_append_sheet(wb, wsLeads, 'Leads');
-      }
+      const kpiHeaders = ['Metric', 'Count'];
+      const kpiRows = [
+        ['Leads', data.totalLeads || 0],
+        ['Pre-therapy Booked', data.pretherapyBooked || 0],
+        ['Booked First Session', data.allTimeBookedCount || 0],
+        ['Unresponsive', data.dropouts || 0],
+        ['Closed', data.closed || 0],
+        ['Referred', data.referred || 0]
+      ];
 
-      if (data.bookings && data.bookings.length > 0) {
-        const bookingHeaders = [
-          'Invitee Name', 'Invitee Phone', 'Invitee Email', 
-          'Host Name', 'Resource Name', 'Status', 'Mode',
-          'Invitee Time', 'Created At', 'Start At'
-        ];
-        const bookingRows = data.bookings.map((b: any) => [
-          b.invitee_name || '',
-          b.invitee_phone || '',
-          b.invitee_email || '',
-          b.booking_host_name || '',
-          b.booking_resource_name || '',
-          b.booking_status || '',
-          b.booking_mode || '',
-          b.booking_invitee_time || '',
-          b.invitee_created_at ? new Date(b.invitee_created_at).toLocaleString() : '',
-          b.booking_start_at ? new Date(b.booking_start_at).toLocaleString() : ''
-        ]);
-        const wsBookings = XLSX.utils.aoa_to_sheet([bookingHeaders, ...bookingRows]);
-        XLSX.utils.book_append_sheet(wb, wsBookings, 'Pre-Therapy Bookings');
-      }
+      const wsKpi = XLSX.utils.aoa_to_sheet([kpiHeaders, ...kpiRows]);
+      
+      // Auto-size columns
+      wsKpi['!cols'] = [
+        { wch: 25 },
+        { wch: 10 }
+      ];
 
-      if ((!data.leads || data.leads.length === 0) && (!data.bookings || data.bookings.length === 0)) {
-        setError('No data found for the selected date range.');
-        setIsExporting(false);
-        return;
-      }
+      XLSX.utils.book_append_sheet(wb, wsKpi, 'KPI Summary');
 
-      XLSX.writeFile(wb, `CRM_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+      XLSX.writeFile(wb, `KPI_Summary_${exportMonth.replace(' ', '_')}.xlsx`);
       onClose();
     } catch (err: any) {
       console.error(err);
-      setError('An error occurred while exporting data.');
+      setError('An error occurred while exporting KPI data.');
     } finally {
       setIsExporting(false);
     }
@@ -97,55 +70,32 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden">
         <div className="flex justify-between items-center p-6 border-b border-gray-100">
-          <h2 className="text-xl font-bold text-gray-900">Export to Excel</h2>
+          <h2 className="text-xl font-bold text-gray-900">Export KPI Summary</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-6">
           {error && (
-            <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4">
+            <div className="bg-red-50 border-l-4 border-red-500 p-4">
               <div className="flex items-center">
                 <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
-                <p className="text-red-700">{error}</p>
+                <p className="text-red-700 text-sm">{error}</p>
               </div>
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Start Date (Optional)</label>
-            <input 
-              type="date" 
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-black outline-none transition-all"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">End Date (Optional)</label>
-            <input 
-              type="date" 
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-black outline-none transition-all"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">What to Export</label>
-            <select 
-              value={exportType}
-              onChange={(e) => setExportType(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-black outline-none transition-all"
-            >
-              <option value="both">Both Leads & Pre-therapy Bookings</option>
-              <option value="leads">Leads Only</option>
-              <option value="pretherapy">Pre-therapy Bookings Only</option>
-            </select>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Select Month</label>
+            <div className="w-full">
+              <MonthFilter selectedMonth={exportMonth} onChange={setExportMonth} />
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Exports the total counts of all KPIs for the selected month.
+            </p>
           </div>
         </div>
 
