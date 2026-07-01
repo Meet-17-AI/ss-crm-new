@@ -126,10 +126,17 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
     setLoadingExpandedForm(true)
     
     try {
-      const response = await fetch(`/api/leads/${leadId}/forms`)
-      if (response.ok) {
-        const json = await response.json()
-        setExpandedFormData(json.data)
+      if (formType === 'pretherapy') {
+        const response = await fetch(`/api/pretherapy-form/${leadId}`)
+        if (response.ok) {
+          const data = await response.json()
+          setExpandedFormData({ pretherapy: { fields: data } })
+        } else {
+          setExpandedFormData({ pretherapy: { fields: null } })
+        }
+      } else {
+        // Fallback for followup if it gets a dedicated endpoint in the future
+        setExpandedFormData({ followup: { fields: null } })
       }
     } catch (err) {
       console.error('Error fetching expanded form data:', err)
