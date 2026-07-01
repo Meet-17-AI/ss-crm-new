@@ -1363,6 +1363,185 @@ app.delete('/api/leads/:id', async (req, res) => {
   }
 });
 
+// Forms Endpoints
+app.get('/api/leads/:id/forms', async (req, res) => {
+  try {
+    const { id: leadId } = req.params;
+
+    // Get pre-therapy form data
+    const pretherapyResult = await pool.query(
+      `SELECT field_name, field_value FROM form_field_values
+       WHERE lead_id = $1 AND form_type = 'pretherapy_form'`,
+      [leadId]
+    );
+
+    // Get follow-up form data
+    const followupResult = await pool.query(
+      `SELECT field_name, field_value FROM form_field_values
+       WHERE lead_id = $1 AND form_type = 'followup_remarks'`,
+      [leadId]
+    );
+
+    // Convert arrays to objects
+    const pretherapyForm = Object.fromEntries(
+      pretherapyResult.rows.map((r: any) => [r.field_name, r.field_value])
+    );
+
+    const followupForm = Object.fromEntries(
+      followupResult.rows.map((r: any) => [r.field_name, r.field_value])
+    );
+
+    // Get submission history
+    const submissionsResult = await pool.query(
+      `SELECT form_type, submitted_at, submitted_by FROM form_submissions
+       WHERE lead_id = $1
+       ORDER BY submitted_at DESC`,
+      [leadId]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        pretherapy: {
+          fields: pretherapyForm,
+          submittedAt: submissionsResult.rows.find((s: any) => s.form_type === 'pretherapy_form')?.submitted_at,
+          submittedBy: submissionsResult.rows.find((s: any) => s.form_type === 'pretherapy_form')?.submitted_by
+        },
+        followup: {
+          fields: followupForm,
+          submittedAt: submissionsResult.rows.find((s: any) => s.form_type === 'followup_remarks')?.submitted_at,
+          submittedBy: submissionsResult.rows.find((s: any) => s.form_type === 'followup_remarks')?.submitted_by
+        },
+        submissions: submissionsResult.rows
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching forms:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch forms'
+    });
+  }
+});
+
+// Autosave Endpoints
+app.post('/api/leads/:id/autosave', async (req, res) => {
+  try {
+    const { id: leadId } = req.params;
+    const { formType, draftData } = req.body;
+    const savedBy = 'system';
+
+    if (!formType || !draftData) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+
+    const draftResult = await pool.query(
+      `INSERT INTO form_draft_storage (lead_id, form_type, draft_data, autosaved_by, last_autosave_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (lead_id, form_type) DO UPDATE SET
+         draft_data = $3, last_autosave_at = NOW(), autosaved_by = $4
+       RETURNING draft_id, last_autosave_at`,
+      [leadId, formType, JSON.stringify(draftData), savedBy]
+    );
+
+    await pool.query(
+      `INSERT INTO autosave_activity (lead_id, form_type, last_save_at, save_count, last_keystroke_at)
+       VALUES ($1, $2, NOW(), 1, NOW())
+       ON CONFLICT (lead_id, form_type) DO UPDATE SET
+         save_count = save_count + 1, last_save_at = NOW(), last_keystroke_at = NOW()`,
+      [leadId, formType]
+    );
+
+    const saved = draftResult.rows[0];
+    res.json({
+      success: true,
+      data: { draftId: saved.draft_id, savedAt: saved.last_autosave_at },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Error auto-saving draft:', error);
+    res.status(500).json({ success: false, error: 'Failed to auto-save draft' });
+  }
+});
+
+app.get('/api/leads/:id/draft/:formType', async (req, res) => {
+  try {
+    const { id: leadId, formType } = req.params;
+    const result = await pool.query(
+      `SELECT draft_id, draft_data, last_autosave_at, autosaved_by
+       FROM form_draft_storage
+       WHERE lead_id = $1 AND form_type = $2`,
+      [leadId, formType]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ success: true, data: null });
+    }
+    const draft = result.rows[0];
+    res.json({
+      success: true,
+      data: {
+        draftId: draft.draft_id, formType, draftData: draft.draft_data,
+        savedAt: draft.last_autosave_at, savedBy: draft.autosaved_by
+      }
+    });
+  } catch (error: any) {
+    console.error('Error fetching draft:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch draft' });
+  }
+});
+
+app.post('/api/leads/:id/draft/:formType/recover', async (req, res) => {
+  try {
+    const { id: leadId, formType } = req.params;
+    const recoveredBy = 'system';
+    const draftResult = await pool.query(
+      `SELECT draft_data, last_autosave_at FROM form_draft_storage WHERE lead_id = $1 AND form_type = $2`,
+      [leadId, formType]
+    );
+    if (draftResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Draft not found' });
+    }
+    const draft = draftResult.rows[0];
+    await pool.query(
+      `INSERT INTO interaction_log (lead_id, interaction_type, interaction_detail, interacted_by)
+       VALUES ($1, 'draft_recovered', $2 || ' draft recovered by ' || $3, $3)`,
+      [leadId, formType, recoveredBy]
+    );
+    res.json({
+      success: true, data: { draftData: draft.draft_data, recoveredAt: new Date().toISOString() }
+    });
+  } catch (error: any) {
+    console.error('Error recovering draft:', error);
+    res.status(500).json({ success: false, error: 'Failed to recover draft' });
+  }
+});
+
+app.post('/api/leads/:id/draft/:formType/discard', async (req, res) => {
+  try {
+    const { id: leadId, formType } = req.params;
+    await pool.query(\`DELETE FROM form_draft_storage WHERE lead_id = $1 AND form_type = $2\`, [leadId, formType]);
+    res.json({ success: true, message: 'Draft discarded successfully' });
+  } catch (error: any) {
+    console.error('Error discarding draft:', error);
+    res.status(500).json({ success: false, error: 'Failed to discard draft' });
+  }
+});
+
+app.get('/api/leads/:id/autosave-stats', async (req, res) => {
+  try {
+    const { id: leadId } = req.params;
+    const result = await pool.query(
+      \`SELECT form_type, save_count, last_save_at, last_keystroke_at FROM autosave_activity WHERE lead_id = $1 ORDER BY last_save_at DESC\`,
+      [leadId]
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error: any) {
+    console.error('Error fetching autosave stats:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch autosave stats' });
+  }
+});
+
 // Pre-Therapy Call Form Endpoints
 app.post('/api/pretherapy-form', async (req, res) => {
   try {
