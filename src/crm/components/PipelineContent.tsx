@@ -7,7 +7,7 @@ import './MonthFilter.css'
 import { Loader } from '../../../components/Loader'
 import { Toast } from '../../../components/Toast'
 import { SendBookingModal } from '../../../components/SendBookingModal'
-import PretherapyFormComponent from '../../../components/PretherapyFormComponent'
+
 import FollowupRemarksComponent from '../../../components/FollowupRemarksComponent'
 import PretherapyIconComponent from '../../../components/PretherapyIconComponent'
 import MonthFilter from './MonthFilter'
@@ -887,13 +887,33 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                                     <p className="text-[10px] text-gray-500 mt-1">Loading...</p>
                                   </div>
                                 ) : activeFormType === 'pretherapy' ? (
-                                  <PretherapyFormComponent
+                                  <PreTherapyCallFormModal
+                                    isOpen={true}
+                                    isInline={true}
+                                    isEditMode={true}
                                     leadId={lead.id}
+                                    leadName={lead.name}
+                                    fromStage={lead.pipeline_stage || ''}
+                                    initialAge={lead.age || ''}
                                     initialData={expandedFormData?.pretherapy?.fields}
-                                    onSaved={() => {
-                                      setExpandedLeadId(null);
-                                      setToast({ message: 'Pre-therapy form saved successfully', type: 'success' });
-                                      window.location.reload();
+                                    onConfirm={async (remark, formData) => {
+                                      try {
+                                        await fetch('/api/pretherapy-form', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({
+                                            lead_id: lead.id,
+                                            submitted_by: currentUser?.id || null,
+                                            ...formData,
+                                          }),
+                                        });
+                                        setExpandedLeadId(null);
+                                        setToast({ message: 'Pre-therapy form saved successfully', type: 'success' });
+                                        window.location.reload();
+                                      } catch (err) {
+                                        console.error('Failed to save pre-therapy form', err);
+                                        setToast({ message: 'Failed to save form', type: 'error' });
+                                      }
                                     }}
                                     onCancel={() => setExpandedLeadId(null)}
                                   />
