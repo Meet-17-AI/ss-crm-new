@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Search, Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import AddLeadModal from './AddLeadModal'
@@ -120,14 +120,21 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
     fetchLeads()
   }, [refreshTrigger])
 
+  const filterMonthIndex = useMemo(() => {
+    if (!selectedMonth || selectedMonth === 'All Time') return null;
+    const [monthName, year] = selectedMonth.split(' ');
+    return {
+      month: new Date(`${monthName} 1, ${year}`).getMonth(),
+      year: parseInt(year, 10)
+    };
+  }, [selectedMonth]);
+
   const filteredLeads = leads
     .filter(l => activeTab === 'all' || l.stage === activeTab)
     .filter(l => {
-      if (selectedMonth && selectedMonth !== 'All Time') {
-        const [monthName, year] = selectedMonth.split(' ')
-        const monthIndex = new Date(`${monthName} 1, ${year}`).getMonth()
+      if (filterMonthIndex) {
         const leadDate = new Date(l.createdDate)
-        if (leadDate.getMonth() !== monthIndex || leadDate.getFullYear() !== parseInt(year)) return false
+        if (leadDate.getMonth() !== filterMonthIndex.month || leadDate.getFullYear() !== filterMonthIndex.year) return false
       }
       return true
     })
@@ -173,12 +180,10 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
 
   const countForTab = (tabId: string) => {
     const base = tabId === 'all' ? leads : leads.filter(l => l.stage === tabId)
-    if (!selectedMonth || selectedMonth === 'All Time') return base.length
-    const [monthName, year] = selectedMonth.split(' ')
-    const monthIndex = new Date(`${monthName} 1, ${year}`).getMonth()
+    if (!filterMonthIndex) return base.length
     return base.filter(l => {
       const d = new Date(l.createdDate)
-      return d.getMonth() === monthIndex && d.getFullYear() === parseInt(year)
+      return d.getMonth() === filterMonthIndex.month && d.getFullYear() === filterMonthIndex.year
     }).length
   }
 

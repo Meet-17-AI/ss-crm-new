@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import StageRemarkModal from './StageRemarkModal'
 import PreTherapyCallFormModal, { type PreTherapyFormData } from './PreTherapyCallFormModal'
 import TherapistAssignmentDropdown from './TherapistAssignmentDropdown'
@@ -550,6 +550,15 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
       : { backgroundColor: '#fff5f5', borderColor: '#fecaca' }  // cold - soft red
   }
 
+  const filterMonthIndex = useMemo(() => {
+    if (!selectedMonth || selectedMonth === 'All Time') return null;
+    const [monthName, year] = selectedMonth.split(' ');
+    return {
+      month: new Date(`${monthName} 1, ${year}`).getMonth(),
+      year: parseInt(year, 10)
+    };
+  }, [selectedMonth]);
+
   return (
     <div className="pipeline-content relative min-h-full">
       {loading ? (
@@ -577,11 +586,9 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                   <h3 className="column-title">{stage.title}</h3>
                   <span className="column-count">{(() => {
                     const filtered = stage.leads.filter(lead => {
-                      if (selectedMonth && selectedMonth !== 'All Time') {
-                        const [monthName, year] = selectedMonth.split(' ')
-                        const monthIndex = new Date(`${monthName} 1, ${year}`).getMonth()
+                      if (filterMonthIndex) {
                         const leadDate = new Date(lead.date)
-                        if (leadDate.getMonth() !== monthIndex || leadDate.getFullYear() !== parseInt(year)) return false
+                        if (leadDate.getMonth() !== filterMonthIndex.month || leadDate.getFullYear() !== filterMonthIndex.year) return false
                       }
                       const term = (stageSearch[stage.id] || '').toLowerCase()
                       if (!term) return true
@@ -612,11 +619,9 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                     const filteredLeads = stage.leads.filter(lead => {
                       const term = (stageSearch[stage.id] || '').toLowerCase()
                       // Month filter
-                      if (selectedMonth && selectedMonth !== 'All Time') {
-                        const [monthName, year] = selectedMonth.split(' ')
-                        const monthIndex = new Date(`${monthName} 1, ${year}`).getMonth()
+                      if (filterMonthIndex) {
                         const leadDate = new Date(lead.date)
-                        if (leadDate.getMonth() !== monthIndex || leadDate.getFullYear() !== parseInt(year)) {
+                        if (leadDate.getMonth() !== filterMonthIndex.month || leadDate.getFullYear() !== filterMonthIndex.year) {
                           return false
                         }
                       }
