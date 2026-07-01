@@ -879,44 +879,13 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                             )}
 
                             {/* Expandable form content */}
-                            {expandedLeadId === lead.id && (
+                            {expandedLeadId === lead.id && activeFormType === 'followup' && (
                               <div className="mt-3 pt-3 border-t border-gray-200" onClick={e => e.stopPropagation()}>
                                 {loadingExpandedForm ? (
                                   <div className="text-center py-2">
                                     <div className="inline-block w-4 h-4 border-2 border-gray-300 border-t-teal-700 rounded-full animate-spin"></div>
                                     <p className="text-[10px] text-gray-500 mt-1">Loading...</p>
                                   </div>
-                                ) : activeFormType === 'pretherapy' ? (
-                                  <PreTherapyCallFormModal
-                                    isOpen={true}
-                                    isInline={true}
-                                    isEditMode={true}
-                                    leadId={lead.id}
-                                    leadName={lead.name}
-                                    fromStage={lead.pipeline_stage || ''}
-                                    initialAge={lead.age || ''}
-                                    initialData={expandedFormData?.pretherapy?.fields}
-                                    onConfirm={async (remark, formData) => {
-                                      try {
-                                        await fetch('/api/pretherapy-form', {
-                                          method: 'POST',
-                                          headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify({
-                                            lead_id: lead.id,
-                                            submitted_by: currentUser?.id || null,
-                                            ...formData,
-                                          }),
-                                        });
-                                        setExpandedLeadId(null);
-                                        setToast({ message: 'Pre-therapy form saved successfully', type: 'success' });
-                                        window.location.reload();
-                                      } catch (err) {
-                                        console.error('Failed to save pre-therapy form', err);
-                                        setToast({ message: 'Failed to save form', type: 'error' });
-                                      }
-                                    }}
-                                    onCancel={() => setExpandedLeadId(null)}
-                                  />
                                 ) : (
                                   <FollowupRemarksComponent
                                     leadId={lead.id}
@@ -965,6 +934,66 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
               onCancel={handleRemarkCancel}
             />
           )}
+          {(() => {
+            const activeExpandedLead = expandedLeadId && activeFormType === 'pretherapy'
+              ? stages.flatMap(s => s.leads).find(l => l.id === expandedLeadId)
+              : null;
+              
+            if (!activeExpandedLead) return null;
+
+            if (loadingExpandedForm) {
+              return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-white p-6 rounded-lg text-center shadow-xl">
+                    <div className="inline-block w-8 h-8 border-4 border-gray-300 border-t-teal-700 rounded-full animate-spin"></div>
+                    <p className="mt-4 text-sm font-medium text-gray-700">Loading form data...</p>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <PreTherapyCallFormModal
+                isOpen={true}
+                isInline={false}
+                isEditMode={true}
+                leadId={activeExpandedLead.id}
+                leadName={activeExpandedLead.name}
+                fromStage={activeExpandedLead.pipeline_stage || ''}
+                initialAge={activeExpandedLead.age || ''}
+                initialData={expandedFormData?.pretherapy?.fields}
+                onConfirm={async (remark, formData, futureAction) => {
+                  try {
+                    await fetch('/api/pretherapy-form', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        lead_id: activeExpandedLead.id,
+                        submitted_by: currentUser?.id || null,
+                        ...formData,
+                      }),
+                    });
+
+                    if (futureAction) {
+                      await fetch(`/api/leads/${activeExpandedLead.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ future_action: futureAction }),
+                      });
+                    }
+
+                    setExpandedLeadId(null);
+                    setToast({ message: 'Pre-therapy form saved successfully', type: 'success' });
+                    window.location.reload();
+                  } catch (err) {
+                    console.error('Failed to save pre-therapy form', err);
+                    setToast({ message: 'Failed to save form', type: 'error' });
+                  }
+                }}
+                onCancel={() => setExpandedLeadId(null)}
+              />
+            );
+          })()}
           <SendBookingModal
             isOpen={isModalOpen}
             onClose={() => {

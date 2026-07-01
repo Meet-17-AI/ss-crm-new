@@ -46,7 +46,7 @@ interface Props {
   isEditMode?: boolean;
   isInline?: boolean;
   initialData?: PreTherapyFormData | null;
-  onConfirm: (remark: string, formData: PreTherapyFormData) => void;
+  onConfirm: (remark: string, formData: PreTherapyFormData, futureAction?: string) => void;
   onCancel: () => void;
 }
 
@@ -154,6 +154,7 @@ const sanitizeData = (data: any, defaultAge: string = '') => {
 const PreTherapyCallFormModal: React.FC<Props> = ({ isOpen, leadName, fromStage, initialAge, isEditMode, isInline, initialData, onConfirm, onCancel }) => {
   const [form, setForm] = useState<PreTherapyFormData>(() => sanitizeData(initialData, initialAge));
   const [remark, setRemark] = useState('');
+  const [futureAction, setFutureAction] = useState('');
   const [showError, setShowError] = useState(false);
 
   // Reset form and prefill age whenever modal opens or changes
@@ -161,6 +162,7 @@ const PreTherapyCallFormModal: React.FC<Props> = ({ isOpen, leadName, fromStage,
     if (isOpen) {
       setForm(sanitizeData(initialData, initialAge));
       setRemark('');
+      setFutureAction('');
       setShowError(false);
     }
   }, [isOpen, initialAge, initialData]);
@@ -174,15 +176,17 @@ const PreTherapyCallFormModal: React.FC<Props> = ({ isOpen, leadName, fromStage,
       setShowError(true);
       return;
     }
-    onConfirm(remark || 'Pre-therapy call form submitted', form);
+    onConfirm(remark || 'Pre-therapy call form submitted', form, futureAction || undefined);
     setForm(emptyForm);
     setRemark('');
+    setFutureAction('');
     setShowError(false);
   };
 
   const handleCancel = () => {
     setForm(emptyForm);
     setRemark('');
+    setFutureAction('');
     setShowError(false);
     onCancel();
   };
@@ -516,6 +520,23 @@ const PreTherapyCallFormModal: React.FC<Props> = ({ isOpen, leadName, fromStage,
                 style={{ width: '100%', marginTop: 8, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }}
               />
             )}
+          </FormQuestion>
+
+          <FormQuestion label="Future Action (optional)">
+            <select
+                value={futureAction}
+                onChange={e => setFutureAction(e.target.value)}
+                style={{
+                    width: '100%', padding: '10px 14px', border: '1px solid #d1d5db',
+                    borderRadius: '8px', fontSize: '13px', background: '#fff', cursor: 'pointer',
+                    color: futureAction ? '#111827' : '#9ca3af', boxSizing: 'border-box'
+                }}
+            >
+                <option value="">Select action...</option>
+                <option value="Call">Call</option>
+                <option value="Email">Email</option>
+                <option value="Text">Text</option>
+            </select>
           </FormQuestion>
 
           {/* Additional remark */}
