@@ -41,7 +41,6 @@ const REMARK_COLUMN_MAP: Record<string, string> = {
   'pretherapy-call': 'remark_pretherapy_call',
   'booked-first-session': 'remark_booked_first_session',
   'dropouts': 'remark_unresponsive',
-  'leaks': 'remark_leaks',
   'referred': 'remark_referred',
   'closed': 'remark_closed',
 };
@@ -54,7 +53,6 @@ const TIMESTAMP_COLUMN_MAP: Record<string, string> = {
   'pretherapy-call': 'stage_pretherapy_call_at',
   'booked-first-session': 'stage_booked_first_session_at',
   'dropouts': 'stage_dropouts_at',
-  'leaks': 'stage_leaks_at',
   'referred': 'stage_referred_at',
   'closed': 'stage_closed_at',
 };
@@ -1074,8 +1072,7 @@ app.patch('/api/leads/:id/stage', async (req, res) => {
         'followup-1': 'Follow Up',
         'pretherapy-call': 'Pre-therapy Call',
         'booked-first-session': 'Booked First Session',
-        'dropouts-unresponsive': 'Dropouts (Unresponsive)',
-        'leaks': 'Leaks',
+        'dropouts': 'Dropouts (Unresponsive)',
         'referred': 'Referred',
         'closed': 'Closed'
       };
@@ -1187,7 +1184,6 @@ app.patch('/api/leads/:id', async (req, res) => {
       remark_booked_first_session: 'remark_booked_first_session',
       remark_dropouts: 'remark_dropouts',
       remark_unresponsive: 'remark_unresponsive',
-      remark_leaks: 'remark_leaks',
       remark_referred: 'remark_referred',
       remark_closed: 'remark_closed',
       general_remarks: 'general_remarks',
@@ -1524,7 +1520,7 @@ app.post('/api/leads/:id/draft/:formType/recover', async (req, res) => {
 app.post('/api/leads/:id/draft/:formType/discard', async (req, res) => {
   try {
     const { id: leadId, formType } = req.params;
-    await pool.query(\`DELETE FROM form_draft_storage WHERE lead_id = $1 AND form_type = $2\`, [leadId, formType]);
+    await pool.query(`DELETE FROM form_draft_storage WHERE lead_id = $1 AND form_type = $2`, [leadId, formType]);
     res.json({ success: true, message: 'Draft discarded successfully' });
   } catch (error: any) {
     console.error('Error discarding draft:', error);
@@ -1536,7 +1532,7 @@ app.get('/api/leads/:id/autosave-stats', async (req, res) => {
   try {
     const { id: leadId } = req.params;
     const result = await pool.query(
-      \`SELECT form_type, save_count, last_save_at, last_keystroke_at FROM autosave_activity WHERE lead_id = $1 ORDER BY last_save_at DESC\`,
+      `SELECT form_type, save_count, last_save_at, last_keystroke_at FROM autosave_activity WHERE lead_id = $1 ORDER BY last_save_at DESC`,
       [leadId]
     );
     res.json({ success: true, data: result.rows });
@@ -1774,11 +1770,7 @@ app.get('/api/analytics', async (req, res) => {
           UNION ALL
           SELECT 'referred' FROM leads WHERE stage_referred_at IS NOT NULL AND EXTRACT(MONTH FROM stage_referred_at) = $1 AND EXTRACT(YEAR FROM stage_referred_at) = $2
           UNION ALL
-          SELECT 'closed' FROM leads WHERE stage_closed_at IS NOT NULL AND EXTRACT(MONTH FROM stage_closed_at) = $1 AND EXTRACT(YEAR FROM stage_closed_at) = $2
-          UNION ALL
           SELECT 'dropouts' FROM leads WHERE stage_dropouts_at IS NOT NULL AND EXTRACT(MONTH FROM stage_dropouts_at) = $1 AND EXTRACT(YEAR FROM stage_dropouts_at) = $2
-          UNION ALL
-          SELECT 'leaks' FROM leads WHERE stage_leaks_at IS NOT NULL AND EXTRACT(MONTH FROM stage_leaks_at) = $1 AND EXTRACT(YEAR FROM stage_leaks_at) = $2
         ) t GROUP BY stage
       `, [fMonth, fYear]);
     } else {
@@ -1809,10 +1801,6 @@ app.get('/api/analytics', async (req, res) => {
       `SELECT COUNT(*) as count FROM leads WHERE pipeline_stage = 'dropouts' ${buildStageFilter('stage_dropouts_at')}`,
       stageMonthParams
     );
-    const allTimeLeaksRes = await pool.query(
-      `SELECT COUNT(*) as count FROM leads WHERE pipeline_stage = 'leaks' ${buildStageFilter('stage_leaks_at')}`,
-      stageMonthParams
-    );
     const allTimeClosedRes = await pool.query(
       `SELECT COUNT(*) as count FROM leads WHERE pipeline_stage = 'closed' ${buildStageFilter('stage_closed_at')}`,
       stageMonthParams
@@ -1839,7 +1827,6 @@ app.get('/api/analytics', async (req, res) => {
     );
 
     const dropoutsCount = allTimeDropoutsRes.rows[0].count;
-    const leaksCount = allTimeLeaksRes.rows[0].count;
     const closedCount = parseInt(allTimeClosedRes.rows[0].count);
     const totalLeadsCount = parseInt(totalLeadsRes.rows[0].count);
     const allTimeBookedCount = parseInt(allTimeBookedRes.rows[0].count);
@@ -1851,7 +1838,6 @@ app.get('/api/analytics', async (req, res) => {
     res.json({
       totalLeads: totalLeadsCount,
       dropouts: parseInt(dropoutsCount),
-      leaks: parseInt(leaksCount),
       closed: closedCount,
       referred: referredCount,
       pretherapyBooked: pretherapyBookedCount,
@@ -5168,7 +5154,7 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
             } else {
               // Paid session: Move to booked-first-session if in an earlier stage
               // Inclusive of: lead-inquire, contacted, pretherapy-call, and all follow-up stages
-              const convertStages = ['lead-inquire', 'contacted', 'pretherapy-call', 'followup-1', 'followup-2', 'followup-3', 'dropouts', 'leaks'];
+              const convertStages = ['lead-inquire', 'contacted', 'pretherapy-call', 'followup-1', 'followup-2', 'followup-3', 'dropouts'];
               if (convertStages.includes(currentStage)) {
                 targetStage = 'booked-first-session';
                 timestampColumn = 'stage_booked_first_session_at';

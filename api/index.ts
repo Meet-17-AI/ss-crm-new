@@ -40,7 +40,6 @@ const REMARK_COLUMN_MAP: Record<string, string> = {
     'pretherapy-call': 'remark_pretherapy_call',
     'booked-first-session': 'remark_booked_first_session',
     'dropouts': 'remark_unresponsive',
-    'leaks': 'remark_leaks',
     'referred': 'remark_referred',
     'closed': 'remark_closed',
 };
@@ -53,7 +52,6 @@ const TIMESTAMP_COLUMN_MAP: Record<string, string> = {
     'pretherapy-call': 'stage_pretherapy_call_at',
     'booked-first-session': 'stage_booked_first_session_at',
     'dropouts': 'stage_dropouts_at',
-    'leaks': 'stage_leaks_at',
     'referred': 'stage_referred_at',
     'closed': 'stage_closed_at',
 };
@@ -963,7 +961,6 @@ app.patch('/api/leads/:id/stage', async (req, res) => {
             'pretherapy-call': 'Pre-therapy Call',
             'booked-first-session': 'Booked First Session',
             'dropouts-unresponsive': 'Dropouts (Unresponsive)',
-            'leaks': 'Leaks',
             'referred': 'Referred',
             'closed': 'Closed'
           };
@@ -1017,7 +1014,6 @@ app.patch('/api/leads/:id', async (req, res) => {
             remark_booked_first_session: 'remark_booked_first_session',
             remark_dropouts: 'remark_dropouts',
             remark_unresponsive: 'remark_unresponsive',
-            remark_leaks: 'remark_leaks',
             remark_referred: 'remark_referred',
             remark_closed: 'remark_closed',
             general_remarks: 'general_remarks',
@@ -1734,7 +1730,6 @@ app.get('/api/analytics', async (req, res) => {
         res.json({
             totalLeads: totalLeadsCount,
             dropouts: parseInt(dropoutsCount),
-            leaks: parseInt(leaksCount),
             closed: closedCount,
             referred: referredCount,
             pretherapyBooked: pretherapyBookedCount,
@@ -5054,7 +5049,7 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
             } else {
               // Paid session: Move to booked-first-session if in an earlier stage
               // Inclusive of: lead-inquire, pretherapy-call, and all follow-up stages
-              const convertStages = ['lead-inquire', 'contacted', 'pretherapy-call', 'followup-1', 'followup-2', 'followup-3', 'dropouts', 'leaks'];
+              const convertStages = ['lead-inquire', 'contacted', 'pretherapy-call', 'followup-1', 'followup-2', 'followup-3', 'dropouts'];
               if (convertStages.includes(currentStage)) {
                 targetStage = 'booked-first-session';
                 timestampColumn = 'stage_booked_first_session_at';

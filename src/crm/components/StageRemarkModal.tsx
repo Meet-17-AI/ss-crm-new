@@ -17,8 +17,7 @@ const STAGE_LABELS: Record<string, string> = {
     'booked-first-session': 'Booked First Session',
     'referred': 'Referred',
     'closed': 'Closed',
-    'dropouts': 'Unresponsive',
-    'leaks': 'Leaks',
+    'dropouts': 'Unresponsive'
 };
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];

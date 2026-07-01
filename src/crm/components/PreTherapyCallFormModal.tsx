@@ -55,8 +55,7 @@ const STAGE_LABELS: Record<string, string> = {
   'pretherapy-call': 'Pre-therapy Call',
   'followup-1': 'Follow ups',
   'booked-first-session': 'Booked First Session',
-  'dropouts': 'Unresponsive',
-  'leaks': 'Leaks',
+  'dropouts': 'Unresponsive'
 };
 
 export const emptyForm: PreTherapyFormData = {

@@ -22,7 +22,6 @@ interface Lead {
     remark_pretherapy_call?: string
     remark_booked_first_session?: string
     remark_dropouts?: string
-    remark_leaks?: string
     general_remarks?: string
     stage_lead_inquire_at?: string
     stage_contacted_at?: string
@@ -32,7 +31,6 @@ interface Lead {
     stage_pretherapy_call_at?: string
     stage_booked_first_session_at?: string
     stage_dropouts_at?: string
-    stage_leaks_at?: string
     stage_referred_at?: string
     stage_closed_at?: string
     follow_up_1_date?: string
@@ -76,7 +74,6 @@ const STAGES = [
     { id: 'referred', label: 'Referred', remarkKey: 'remark_referred', timestampKey: 'stage_referred_at' },
     { id: 'closed', label: 'Closed', remarkKey: 'remark_closed', timestampKey: 'stage_closed_at' },
     { id: 'dropouts', label: 'Unresponsive', remarkKey: 'remark_unresponsive', timestampKey: 'stage_dropouts_at' },
-    { id: 'leaks', label: 'Leaks', remarkKey: 'remark_leaks', timestampKey: 'stage_leaks_at' },
 ]
 
 const SOURCE_OPTIONS = [
@@ -341,7 +338,7 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
     // Fetch pre-therapy form if applicable
     useEffect(() => {
         if (!lead) return
-        const preTherapyStages = ['pretherapy-call', 'followup-1', 'booked-first-session', 'dropouts', 'leaks']
+        const preTherapyStages = ['pretherapy-call', 'followup-1', 'booked-first-session', 'dropouts']
         if (preTherapyStages.includes(lead.pipeline_stage)) {
             fetch(`/api/pretherapy-form/${lead.id}`)
                 .then(r => r.ok ? r.json() : null)

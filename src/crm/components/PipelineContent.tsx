@@ -58,8 +58,7 @@ const STAGE_ORDER = [
   'booked-first-session',
   'referred',
   'closed',
-  'dropouts',
-  'leaks',
+  'dropouts'
 ]
 
 const STAGE_LABELS: Record<string, string> = {
@@ -69,8 +68,7 @@ const STAGE_LABELS: Record<string, string> = {
   'booked-first-session': 'Booked First Session',
   'referred': 'Referred',
   'closed': 'Closed',
-  'dropouts': 'Unresponsive',
-  'leaks': 'Leaks',
+  'dropouts': 'Dropouts'
 }
 
 const defaultStages: Stage[] = STAGE_ORDER.map(id => ({
@@ -223,8 +221,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                 const stageDateMap: Record<string, string> = {
                     'pretherapy-call': d.stage_pretherapy_call_at,
                     'booked-first-session': d.stage_booked_first_session_at,
-                    'dropouts': d.stage_dropouts_at,
-                    'leaks': d.stage_leaks_at
+                    'dropouts': d.stage_dropouts_at
                 };
                 displayDate = stageDateMap[d.pipeline_stage] || d.created_at;
             }

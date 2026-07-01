@@ -30,8 +30,7 @@ const STAGES = [
   { id: 'booked-first-session', label: 'Booked First Session' },
   { id: 'referred', label: 'Referred' },
   { id: 'closed', label: 'Closed' },
-  { id: 'dropouts', label: 'Unresponsive' },
-  { id: 'leaks', label: 'Leaks' },
+  { id: 'dropouts', label: 'Dropouts' }
 ]
 
 const STAGE_LABEL: Record<string, string> = Object.fromEntries(
@@ -87,8 +86,7 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
             const stageDateMap: Record<string, string> = {
               'pretherapy-call': d.stage_pretherapy_call_at,
               'booked-first-session': d.stage_booked_first_session_at,
-              'dropouts': d.stage_dropouts_at,
-              'leaks': d.stage_leaks_at
+              'dropouts': d.stage_dropouts_at
             };
             displayDate = stageDateMap[d.pipeline_stage] || d.created_at;
           }

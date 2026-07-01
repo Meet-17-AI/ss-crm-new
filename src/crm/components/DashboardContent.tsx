@@ -96,8 +96,7 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
               { id: 'booked-first-session', label: 'Booked First Session' },
               { id: 'referred', label: 'Referred' },
               { id: 'closed', label: 'Closed' },
-              { id: 'dropouts', label: 'Unresponsive' },
-              { id: 'leaks', label: 'Leaks' },
+              { id: 'dropouts', label: 'Unresponsive' }
             ];
 
             const totalMonthlyLeads = STAGES.reduce((acc, stage) => acc + getStageValue(stage.id), 0);
