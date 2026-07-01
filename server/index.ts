@@ -10,6 +10,8 @@ import { uploadFile } from '../lib/minio';
 import phase1Router, { initializePhase1Jobs } from '../api/phase1-routes';
 import phase2Router from '../api/phase2-routes';
 import { sendOTPEmail, sendPasswordResetOTP } from '../lib/email';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 
 // Configure multer for memory storage
 const upload = multer({
@@ -1089,6 +1091,7 @@ app.patch('/api/leads/:id/stage', async (req, res) => {
       console.error('Error creating audit log:', auditErr);
     }
 
+    io.emit('lead_updated', { id });
     res.json(enriched.rows[0]);
   } catch (err) {
     console.error('Error updating lead stage:', err);
@@ -1232,6 +1235,7 @@ app.patch('/api/leads/:id', async (req, res) => {
       console.error('Error creating audit log:', auditErr);
     }
 
+    io.emit('lead_updated', { id });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating lead info:', err);
@@ -6699,7 +6703,22 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 const PORT = 3002;
-app.listen(PORT, () => {
+const httpServer = createServer(app);
+
+export const io = new SocketIOServer(httpServer, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
+});
+
+io.on('connection', (socket) => {
+  console.log('[Socket.io] Client connected to CRM backend:', socket.id);
+  socket.on('join_room', (data) => {
+    if (data?.role === 'admin') socket.join('admin_room');
+    else if (data?.role === 'sales') socket.join('sales_room');
+    else if (data?.role === 'therapist' && data?.userId) socket.join('therapist_room_' + data.userId);
+  });
+});
+
+httpServer.listen(PORT, () => {
   console.log(`\n✓ API server running on http://localhost:${PORT}`);
   startDashboardApiBookingSync();
   try {

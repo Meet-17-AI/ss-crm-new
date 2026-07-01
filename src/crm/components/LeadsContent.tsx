@@ -3,6 +3,7 @@ import { Search, Download } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import AddLeadModal from './AddLeadModal'
 import MonthFilter from './MonthFilter'
+import { useSocket } from '../contexts/WebSocketContext'
 import './LeadsContent.css'
 import './MonthFilter.css'
 import { Loader } from '../../../components/Loader'
@@ -51,6 +52,26 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set())
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
+
+  const { socket } = useSocket()
+
+  useEffect(() => {
+    if (!socket) return
+
+    const handleLeadUpdated = () => {
+      console.log('🔄 WebSocket: Lead updated, refreshing leads...')
+      setRefreshTrigger(prev => prev + 1)
+    }
+
+    socket.on('lead_updated', handleLeadUpdated)
+    socket.on('lead_created', handleLeadUpdated)
+
+    return () => {
+      socket.off('lead_updated', handleLeadUpdated)
+      socket.off('lead_created', handleLeadUpdated)
+    }
+  }, [socket])
 
   const fetchLeads = async () => {
     try {
@@ -97,7 +118,7 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
 
   useEffect(() => {
     fetchLeads()
-  }, [])
+  }, [refreshTrigger])
 
   const filteredLeads = leads
     .filter(l => activeTab === 'all' || l.stage === activeTab)

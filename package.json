@@ -4,16 +4,18 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"tsx server/index.ts\" \"cd crm-backend && npx tsx src/index.ts\"",
-    "server": "concurrently \"tsx server/index.ts\" \"cd crm-backend && npx tsx src/index.ts\"",
+    "dev": "concurrently \"vite\" \"tsx server/index.ts\" \"cd crm-backend && npx tsx src/index.ts\" \"npm run sync\"",
+    "server": "concurrently \"tsx server/index.ts\" \"cd crm-backend && npx tsx src/index.ts\" \"npm run sync\"",
     "build": "vite build",
     "preview": "vite preview",
     "notify:new": "tsx scripts/notifyNewBookings.ts",
     "notify:all": "tsx scripts/notifyExistingBookings.ts",
-    "setup:minio": "tsx scripts/setupMinIO.ts"
+    "setup:minio": "tsx scripts/setupMinIO.ts",
+    "sync": "tsx sync_daemon.ts"
   },
   "dependencies": {
     "@types/pg": "^8.16.0",
+    "@types/socket.io-client": "^1.4.36",
     "axios": "^1.18.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -29,6 +31,8 @@
     "react-big-calendar": "^1.19.4",
     "react-dom": "^19.2.0",
     "react-iconly": "^2.2.10",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

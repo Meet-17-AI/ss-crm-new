@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import StageRemarkModal from './StageRemarkModal'
 import PreTherapyCallFormModal, { type PreTherapyFormData } from './PreTherapyCallFormModal'
 import TherapistAssignmentDropdown from './TherapistAssignmentDropdown'
+import { useSocket } from '../contexts/WebSocketContext'
 import './PipelineContent.css'
 import './MonthFilter.css'
 import { Loader } from '../../../components/Loader'
@@ -85,6 +86,26 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [stageSearch, setStageSearch] = useState<Record<string, string>>({})
   const [selectedMonth, setSelectedMonth] = useState('All Time')
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
+  
+  const { socket } = useSocket()
+
+  useEffect(() => {
+    if (!socket) return
+
+    const handleLeadUpdated = () => {
+      console.log('🔄 WebSocket: Lead updated, refreshing pipeline...')
+      setRefreshTrigger(prev => prev + 1)
+    }
+
+    socket.on('lead_updated', handleLeadUpdated)
+    socket.on('lead_created', handleLeadUpdated)
+
+    return () => {
+      socket.off('lead_updated', handleLeadUpdated)
+      socket.off('lead_created', handleLeadUpdated)
+    }
+  }, [socket])
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [prefilledClientData, setPrefilledClientData] = useState<{ name: string, phone: string, email: string } | undefined>()
@@ -239,14 +260,14 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
             leads: mappedLeads.filter(lead => lead.pipeline_stage === stage.id),
           }))
           setStages(newStages)        }
-      } catch (error) {
-        console.error('Failed to fetch pipeline leads', error)
+      } catch (err) {
+        console.error('Error fetching leads:', err)
       } finally {
         setLoading(false)
       }
     }
     fetchPipelineLeads()
-  }, [])
+  }, [selectedMonth, refreshTrigger])
 
   const formatDate = (dateString: string): string => {
     return new Date(dateString).toLocaleDateString('en-IN', {

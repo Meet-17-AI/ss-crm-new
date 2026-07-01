@@ -8,6 +8,9 @@ import { AdminEditProfile } from '../../../components/AdminEditProfile'
 import { ChangePassword } from '../../../components/ChangePassword'
 import { CRMAuditLogs } from './CRMAuditLogs'
 import ToDoModal from './ToDoModal'
+import { Toast } from '../../../components/Toast'
+import { useSocket } from '../contexts/WebSocketContext'
+import { useState, useEffect } from 'react'
 
 interface DashboardProps {
   currentPage: string
@@ -17,8 +20,38 @@ interface DashboardProps {
 }
 
 const Dashboard = ({ currentPage, setCurrentPage, currentUser, onLogout }: DashboardProps) => {
+  const { socket } = useSocket()
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null)
+
+  useEffect(() => {
+    if (!socket) return
+
+    const handleLeadUpdated = () => {
+      setToast({ message: 'A lead was updated in real-time.', type: 'info' })
+    }
+
+    const handleLeadCreated = () => {
+      setToast({ message: 'New lead received!', type: 'success' })
+    }
+
+    socket.on('lead_updated', handleLeadUpdated)
+    socket.on('lead_created', handleLeadCreated)
+
+    return () => {
+      socket.off('lead_updated', handleLeadUpdated)
+      socket.off('lead_created', handleLeadCreated)
+    }
+  }, [socket])
+
   return (
     <div className="flex h-screen bg-gray-50">
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type as 'success' | 'error'}
+          onClose={() => setToast(null)}
+        />
+      )}
       <div className="w-64 flex-shrink-0">
         <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} currentUser={currentUser} onLogout={onLogout} />
       </div>

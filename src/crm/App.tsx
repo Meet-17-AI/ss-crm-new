@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import Dashboard from './components/Dashboard'
 import MobileWarning from './components/MobileWarning'
+import { WebSocketProvider } from './contexts/WebSocketContext'
 
 interface CRMAppProps {
   user?: any
@@ -24,7 +25,11 @@ function App({ user, onLogout }: CRMAppProps) {
     return <MobileWarning />
   }
 
-  return <Dashboard currentPage={currentPage} setCurrentPage={setCurrentPage} currentUser={user} onLogout={onLogout} />
+  return (
+    <WebSocketProvider>
+      <Dashboard currentPage={currentPage} setCurrentPage={setCurrentPage} currentUser={user} onLogout={onLogout} />
+    </WebSocketProvider>
+  )
 }
 
 export default App
