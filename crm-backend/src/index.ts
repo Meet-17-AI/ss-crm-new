@@ -1266,8 +1266,8 @@ app.post('/api/leads', async (req, res) => {
              FROM bookings b
              LEFT JOIN therapists t ON b.booking_host_name ILIKE '%' || SPLIT_PART(t.name, ' ', 1) || '%'
              LEFT JOIN users u ON u.therapist_id = t.therapist_id AND u.role = 'therapist'
-             WHERE (RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(b.invitee_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), 10) = RIGHT($1, 10) 
-                OR (LOWER(TRIM(b.invitee_email)) = $2 AND $2 <> ''))
+             WHERE ( (RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(b.invitee_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), 10) = RIGHT($1, 10) AND $1 <> '')
+                OR (LOWER(TRIM(b.invitee_email)) = $2 AND $2 <> '') )
              AND b.booking_status NOT IN ('cancelled', 'canceled', 'no-show')
              ORDER BY b.booking_start_at DESC LIMIT 1`,
       [normalizedPhone, normalizedEmail]
@@ -1280,6 +1280,8 @@ app.post('/api/leads', async (req, res) => {
     if (bookingCheck.rows.length > 0) {
       const booking = bookingCheck.rows[0];
       const isFree = (booking.booking_resource_name || '').toLowerCase().includes('free consultation') ||
+        (booking.booking_resource_name || '').toLowerCase().includes('pre-therapy') ||
+        (booking.booking_resource_name || '').toLowerCase().includes('pre therapy') ||
         parseFloat(booking.invitee_payment_amount || '0') === 0;
 
       if (isFree) {
@@ -5144,13 +5146,14 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
           // Determine if it's a Free Consultation
           const isFreeConsultation = (booking.booking_resource_name || '').toLowerCase().includes('free consultation') || 
                                      (booking.booking_resource_name || '').toLowerCase().includes('pre-therapy') ||
+                                     (booking.booking_resource_name || '').toLowerCase().includes('pre therapy') ||
                                      parseFloat(booking.invitee_payment_amount || '0') === 0;
 
           // Find matching lead - normalizing phone for comparison
           const leadResult = await pool.query(
             `SELECT id, name, pipeline_stage FROM leads 
-             WHERE (RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), 10) = RIGHT($1, 10) 
-                OR LOWER(TRIM(email)) = $2)
+             WHERE ( (RIGHT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), 10) = RIGHT($1, 10) AND $1 <> '')
+                OR (LOWER(TRIM(email)) = $2 AND $2 <> '') )
              ORDER BY created_at DESC LIMIT 1`,
             [inviteePhone, inviteeEmail]
           );
