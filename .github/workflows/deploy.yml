@@ -108,6 +108,27 @@ jobs:
               if [ "$STATUS" = "healthy" ]; then
                 echo "✅ CRM Backend is running and healthy!"
                 docker compose ps
+
+                # ── Traefik routing diagnostics ──
+                echo "── DIAG: DOMAIN_NAME check ──"
+                DN=$(grep '^DOMAIN_NAME=' .env.production | cut -d= -f2)
+                if [ "$DN" = "srv1169280.hstgr.cloud" ]; then echo "DOMAIN_NAME OK"; else echo "DOMAIN_NAME MISMATCH (len=${#DN})"; fi
+                echo "── DIAG: container networks ──"
+                docker inspect ss-crm-backend --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+                echo "── DIAG: traefik containers ──"
+                docker ps --format '{{.Names}} | {{.Status}}' | grep -i traefik || echo "no traefik container found"
+                echo "── DIAG: available docker networks ──"
+                docker network ls --format '{{.Name}}'
+                echo "── DIAG: request via traefik with Host header ──"
+                curl -s -o /dev/null -w 'traefik->crm.backend host: %{http_code}\n' --max-time 5 -H "Host: crm.backend.srv1169280.hstgr.cloud" http://127.0.0.1/health || true
+                curl -sk -o /dev/null -w 'traefik https: %{http_code}\n' --max-time 5 --resolve crm.backend.srv1169280.hstgr.cloud:443:127.0.0.1 https://crm.backend.srv1169280.hstgr.cloud/health || true
+                echo "── DIAG: traefik discovered routers (if api enabled) ──"
+                TRAEFIK_NAME=$(docker ps --format '{{.Names}}' | grep -i traefik | head -1)
+                if [ -n "$TRAEFIK_NAME" ]; then
+                  docker exec $TRAEFIK_NAME wget -qO- http://127.0.0.1:8080/api/http/routers 2>/dev/null | tr ',' '\n' | grep -i 'crm-backend\|rule' | head -20 || echo "traefik api not reachable"
+                  echo "── DIAG: traefik recent logs ──"
+                  docker logs --tail 20 $TRAEFIK_NAME 2>&1 | tail -20
+                fi
                 exit 0
               elif [ "$STATUS" = "unhealthy" ]; then
                 echo "🚨 Container is unhealthy! Fetching logs..."
