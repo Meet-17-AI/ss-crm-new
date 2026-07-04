@@ -47,6 +47,7 @@ gh secret set DB_PASSWORD --body "admin123"
 
 # Frontend URL
 gh secret set FRONTEND_URL --body "https://safestories-crm.vercel.app/"
+gh secret set DOMAIN_NAME --body "srv1169280.hstgr.cloud"
 
 # MinIO Storage Secrets
 gh secret set MINIO_ENDPOINT --body "s3.fluidjobs.ai"

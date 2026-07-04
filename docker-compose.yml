@@ -16,7 +16,7 @@ services:
       - traefik.enable=true
       
       # Main Backend Router (port 3002) - Matches /api (excluding /api/crm)
-      - traefik.http.routers.crm-backend-main.rule=Host(`crm.backend.vpshost`) && PathPrefix(`/api`) && !PathPrefix(`/api/crm`)
+      - traefik.http.routers.crm-backend-main.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api`) && !PathPrefix(`/api/crm`)
       - traefik.http.routers.crm-backend-main.tls=true
       - traefik.http.routers.crm-backend-main.entrypoints=web,websecure
       - traefik.http.routers.crm-backend-main.tls.certresolver=mytlschallenge
@@ -24,7 +24,7 @@ services:
       - traefik.http.services.crm-backend-main-service.loadbalancer.server.port=3002
 
       # CRM Backend Router (port 3003) - Matches /api/crm
-      - traefik.http.routers.crm-backend-crm.rule=Host(`crm.backend.vpshost`) && PathPrefix(`/api/crm`)
+      - traefik.http.routers.crm-backend-crm.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api/crm`)
       - traefik.http.routers.crm-backend-crm.tls=true
       - traefik.http.routers.crm-backend-crm.entrypoints=web,websecure
       - traefik.http.routers.crm-backend-crm.tls.certresolver=mytlschallenge
@@ -37,7 +37,7 @@ services:
       - traefik.http.middlewares.crm-backend.headers.browserXSSFilter=true
       - traefik.http.middlewares.crm-backend.headers.contentTypeNosniff=true
       - traefik.http.middlewares.crm-backend.headers.forceSTSHeader=true
-      - traefik.http.middlewares.crm-backend.headers.SSLHost=crm.backend.vpshost
+      - traefik.http.middlewares.crm-backend.headers.SSLHost=crm.backend.${DOMAIN_NAME}
       - traefik.http.middlewares.crm-backend.headers.STSIncludeSubdomains=true
       - traefik.http.middlewares.crm-backend.headers.STSPreload=true
       - traefik.http.routers.crm-backend-main.middlewares=crm-backend@docker

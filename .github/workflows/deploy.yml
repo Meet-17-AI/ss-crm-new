@@ -53,6 +53,7 @@ jobs:
             
             # Frontend & Domain
             FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+            DOMAIN_NAME=${{ secrets.DOMAIN_NAME || secrets.VPS_HOST }}
             
             # MinIO
             MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }}
