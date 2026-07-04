@@ -1,8 +1,8 @@
 {
   "rewrites": [
-    { "source": "/api/sos-documentation", "destination": "https://safestories-crm.onrender.com/api/sos-documentation" },
-    { "source": "/api/crm/:path*", "destination": "https://safestories-crm.onrender.com/api/crm/:path*" },
-    { "source": "/api/:path*", "destination": "https://safestories-crm.onrender.com/api/:path*" },
+    { "source": "/api/sos-documentation", "destination": "https://crm.backend.srv1169280.hstgr.cloud/api/sos-documentation" },
+    { "source": "/api/crm/:path*", "destination": "https://crm.backend.srv1169280.hstgr.cloud/api/crm/:path*" },
+    { "source": "/api/:path*", "destination": "https://crm.backend.srv1169280.hstgr.cloud/api/:path*" },
     { "source": "/sos-view/:token", "destination": "/index.html" },
     { "source": "/((?!api).*)", "destination": "/index.html" }
   ],
