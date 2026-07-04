@@ -775,7 +775,7 @@ app.put('/api/therapist-profile', async (req, res) => {
 app.get('/api/leads', async (req, res) => {
   try {
     const query = `
-            SELECT 
+            SELECT
                 leads.*,
                 COALESCE(sales.full_name, sales.name) as sales_agent_name,
                 COALESCE(therapists.full_name, therapists.name) as therapist_name,
@@ -784,10 +784,11 @@ app.get('/api/leads', async (req, res) => {
             LEFT JOIN users sales ON leads.sales_agent_id::text = sales.id::text
             LEFT JOIN users therapists ON (leads.therapist_id::text = therapists.id::text OR leads.therapist_id::text = therapists.therapist_id::text)
             LEFT JOIN (
-                SELECT DISTINCT ON (lead_id) lead_id, consultation_outcome 
-                FROM pretherapy_call_forms 
+                SELECT DISTINCT ON (lead_id) lead_id, consultation_outcome
+                FROM pretherapy_call_forms
                 ORDER BY lead_id, submitted_at DESC
             ) ptcf ON leads.id::text = ptcf.lead_id::text
+            WHERE leads.source != 'booking_system'
             ORDER BY leads.created_at DESC
         `;
     const result = await pool.query(query);
