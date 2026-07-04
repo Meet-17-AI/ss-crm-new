@@ -1652,7 +1652,9 @@ app.get('/api/pretherapy-form/:leadId', async (req, res) => {
       `SELECT * FROM pretherapy_call_forms WHERE lead_id = $1 ORDER BY submitted_at DESC LIMIT 1`,
       [leadId]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'No form found' });
+    // "No form yet" is a normal state, not an error — return 200 with null
+    // so the browser console isn't spammed with 404s for every unfilled lead.
+    if (result.rows.length === 0) return res.json(null);
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching pretherapy form:', err);
