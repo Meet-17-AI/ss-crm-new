@@ -8,18 +8,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          script: |
+    env:
+      # Shared deploy script, used by the first attempt and the retry step.
+      DEPLOY_SCRIPT: |
             # Navigate to CRM directory (create if it doesn't exist)
             mkdir -p /opt/ss-crm
             cd /opt/ss-crm
@@ -201,3 +192,39 @@ jobs:
             echo "✅ Deployment verified end-to-end: container healthy + all public URLs responding."
             docker compose ps
             exit 0
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Deploy to VPS via SSH
+        id: deploy_attempt_1
+        continue-on-error: true
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          timeout: 60s
+          script: ${{ env.DEPLOY_SCRIPT }}
+
+      # SSH from GitHub runners to the VPS occasionally fails with
+      # "dial tcp: i/o timeout" (transient network / fail2ban). The deploy
+      # script is rollback-safe, so retrying the whole thing is safe.
+      - name: Wait before retry
+        if: steps.deploy_attempt_1.outcome == 'failure'
+        run: |
+          echo "First SSH attempt failed — waiting 60s before retry..."
+          sleep 60
+
+      - name: Deploy to VPS via SSH (retry)
+        if: steps.deploy_attempt_1.outcome == 'failure'
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          timeout: 60s
+          script: ${{ env.DEPLOY_SCRIPT }}
