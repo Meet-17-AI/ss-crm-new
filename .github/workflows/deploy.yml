@@ -97,22 +97,29 @@ jobs:
             echo "🔄 Starting crm-backend (rolling update)..."
             docker compose up -d crm-backend
             
-            # Verify status and rollback if needed
-            echo "⏳ Verifying container health..."
-            sleep 15
+            # Verify container is actually running and healthy
+            echo "⏳ Waiting for container to become healthy..."
             
-            STATUS=$(docker inspect --format='{{json .State.Health.Status}}' ss-crm-backend 2>/dev/null || echo "unknown")
-            if [ "$STATUS" = "\"unhealthy\"" ]; then
-              echo "🚨 Container health check failed! Fetching logs..."
-              docker compose logs --tail=50 crm-backend
+            for i in $(seq 1 12); do
+              sleep 5
+              STATUS=$(docker inspect --format='{{.State.Health.Status}}' ss-crm-backend 2>/dev/null || echo "not_found")
+              echo "  Health check attempt $i/12: $STATUS"
               
-              # Rolling back by restoring previous image if exists, or stopping
-              echo "🔄 Reverting deployment..."
-              # Docker compose in start-first mode handles rollback if configured,
-              # but as an additional safety net we can stop the failing container.
-              docker compose stop crm-backend
-              exit 1
-            else
-              echo "✅ CRM Backend is running and healthy!"
-              docker compose ps
-            fi
+              if [ "$STATUS" = "healthy" ]; then
+                echo "✅ CRM Backend is running and healthy!"
+                docker compose ps
+                exit 0
+              elif [ "$STATUS" = "unhealthy" ]; then
+                echo "🚨 Container is unhealthy! Fetching logs..."
+                docker compose logs --tail=50 crm-backend
+                docker compose stop crm-backend
+                exit 1
+              elif [ "$STATUS" = "not_found" ]; then
+                echo "🚨 Container not found! Build may have failed."
+                exit 1
+              fi
+            done
+            
+            echo "⚠️ Container did not become healthy within 60 seconds."
+            docker compose logs --tail=30 crm-backend
+            exit 1
