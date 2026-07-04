@@ -32,6 +32,14 @@ services:
       - traefik.http.routers.crm-backend-crm.service=crm-backend-crm-service
       - traefik.http.services.crm-backend-crm-service.loadbalancer.server.port=3003
 
+      # Socket.IO Router (port 3003) - Matches /socket.io for WebSockets
+      - traefik.http.routers.crm-backend-socket.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/socket.io`)
+      - traefik.http.routers.crm-backend-socket.tls=true
+      - traefik.http.routers.crm-backend-socket.entrypoints=web,websecure
+      - traefik.http.routers.crm-backend-socket.tls.certresolver=mytlschallenge
+      - traefik.http.routers.crm-backend-socket.service=crm-backend-socket-service
+      - traefik.http.services.crm-backend-socket-service.loadbalancer.server.port=3003
+
       # Middlewares and headers
       - traefik.http.middlewares.crm-backend.headers.SSLRedirect=true
       - traefik.http.middlewares.crm-backend.headers.STSSeconds=315360000
