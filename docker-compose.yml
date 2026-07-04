@@ -16,21 +16,21 @@ services:
     labels:
       - traefik.enable=true
       
-      # Main Backend Router (port 3004) - Matches /api (excluding /api/crm)
+      # Main Backend Router (port 3002) - Matches /api (excluding /api/crm)
       - traefik.http.routers.crm-backend-main.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api`) && !PathPrefix(`/api/crm`)
       - traefik.http.routers.crm-backend-main.tls=true
       - traefik.http.routers.crm-backend-main.entrypoints=web,websecure
       - traefik.http.routers.crm-backend-main.tls.certresolver=mytlschallenge
       - traefik.http.routers.crm-backend-main.service=crm-backend-main-service
-      - traefik.http.services.crm-backend-main-service.loadbalancer.server.port=3004
+      - traefik.http.services.crm-backend-main-service.loadbalancer.server.port=3002
 
-      # CRM Backend Router (port 3005) - Matches /api/crm
+      # CRM Backend Router (port 3003) - Matches /api/crm
       - traefik.http.routers.crm-backend-crm.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api/crm`)
       - traefik.http.routers.crm-backend-crm.tls=true
       - traefik.http.routers.crm-backend-crm.entrypoints=web,websecure
       - traefik.http.routers.crm-backend-crm.tls.certresolver=mytlschallenge
       - traefik.http.routers.crm-backend-crm.service=crm-backend-crm-service
-      - traefik.http.services.crm-backend-crm-service.loadbalancer.server.port=3005
+      - traefik.http.services.crm-backend-crm-service.loadbalancer.server.port=3003
 
       # Middlewares and headers
       - traefik.http.middlewares.crm-backend.headers.SSLRedirect=true
@@ -47,7 +47,6 @@ services:
 
     environment:
       - NODE_ENV=production
-      - PORT=3004
       - PGHOST=${PGHOST}
       - PGPORT=${PGPORT}
       - PGDATABASE=${PGDATABASE}
