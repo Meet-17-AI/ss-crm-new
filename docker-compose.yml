@@ -3,16 +3,19 @@ version: '3.8'
 services:
   crm-backend:
     container_name: ss-crm-backend
+    image: ss-crm-crm-backend:latest
     env_file: .env.production
     build:
       context: .
       dockerfile: Dockerfile.backend
     healthcheck:
-      test: ["CMD", "node", "-e", "const req = require('http').request({ host: '127.0.0.1', port: 3002, path: '/health', timeout: 2000 }, (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.end();"]
+      # Checks BOTH backend processes: panel server (3002) and CRM server (3003).
+      # If either dies, the container goes unhealthy and restarts (restart: always).
+      test: ["CMD", "node", "-e", "const http=require('http'); const check=(port)=>new Promise((ok,bad)=>{const r=http.request({host:'127.0.0.1',port,path:'/health',timeout:2000},res=>res.statusCode===200?ok():bad());r.on('error',bad);r.on('timeout',()=>{r.destroy();bad();});r.end();}); Promise.all([check(3002),check(3003)]).then(()=>process.exit(0),()=>process.exit(1));"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 30s
     labels:
       - traefik.enable=true
       

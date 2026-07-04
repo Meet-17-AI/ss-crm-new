@@ -33,6 +33,10 @@ jobs:
               git remote set-url origin https://${{ secrets.GH_PAT }}@github.com/safestories-tech/safestories-crm.git
             fi
 
+            # Save current state so we can roll back if the new deploy fails
+            PREV_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+            docker tag ss-crm-crm-backend:latest ss-crm-crm-backend:previous 2>/dev/null || true
+
             # Pull latest changes
             git fetch --all
             git reset --hard origin/main
@@ -93,60 +97,107 @@ jobs:
             # and every request 404s.
             cp .env.production .env
 
+            # ══════════════════════════════════════════════════════════════
+            # STAGE 1: PRE-FLIGHT VALIDATION
+            # Any failure here ABORTS the deploy with the running container
+            # completely untouched — production keeps serving traffic.
+            # ══════════════════════════════════════════════════════════════
+
+            DN=$(grep '^DOMAIN_NAME=' .env | cut -d= -f2)
+            if [ -z "$DN" ]; then
+              echo "❌ ABORT: DOMAIN_NAME is empty — Traefik rules would break. Running container untouched."
+              exit 1
+            fi
+            echo "✓ DOMAIN_NAME present"
+
+            if ! docker compose config -q; then
+              echo "❌ ABORT: docker-compose config invalid. Running container untouched."
+              exit 1
+            fi
+            echo "✓ compose config valid"
+
             # Ensure the docker volume exists
             docker volume inspect crm_backend_data >/dev/null 2>&1 || docker volume create crm_backend_data
-            
-            # Rebuild and restart the container
+
+            # Build the NEW image first — old container keeps running during build
             echo "🚀 Building crm-backend..."
-            docker compose build crm-backend
-            
-            echo "🔄 Starting crm-backend (rolling update)..."
-            docker compose up -d crm-backend
-            
-            # Verify container is actually running and healthy
+            if ! docker compose build crm-backend; then
+              echo "❌ ABORT: build failed. Running container untouched."
+              exit 1
+            fi
+            echo "✓ build succeeded"
+
+            # ══════════════════════════════════════════════════════════════
+            # Rollback helper: restore previous image + previous code and
+            # restart it, so production comes back on the last good version.
+            # ══════════════════════════════════════════════════════════════
+            rollback() {
+              echo "⏪ ROLLING BACK to previous working version..."
+              if docker image inspect ss-crm-crm-backend:previous >/dev/null 2>&1; then
+                docker tag ss-crm-crm-backend:previous ss-crm-crm-backend:latest
+                if [ -n "$PREV_COMMIT" ]; then git reset --hard "$PREV_COMMIT" || true; fi
+                docker compose up -d --no-build crm-backend
+                sleep 20
+                RB_STATUS=$(docker inspect --format='{{.State.Health.Status}}' ss-crm-backend 2>/dev/null || echo unknown)
+                echo "⏪ Rollback complete — container status: $RB_STATUS"
+              else
+                echo "⚠️ No previous image found; restarting whatever is available..."
+                docker compose up -d --no-build crm-backend || true
+              fi
+            }
+
+            # ══════════════════════════════════════════════════════════════
+            # STAGE 2: SWAP to the new version
+            # ══════════════════════════════════════════════════════════════
+            echo "🔄 Swapping to new container..."
+            if ! docker compose up -d crm-backend; then
+              echo "🚨 Swap failed!"
+              rollback
+              exit 1
+            fi
+
+            # ══════════════════════════════════════════════════════════════
+            # STAGE 3: VERIFY — container health, then the PUBLIC URL through
+            # Traefik (catches routing/label breakage that container health
+            # cannot see). Any failure triggers automatic rollback.
+            # ══════════════════════════════════════════════════════════════
             echo "⏳ Waiting for container to become healthy..."
-            
+            HEALTHY=0
             for i in $(seq 1 12); do
               sleep 5
               STATUS=$(docker inspect --format='{{.State.Health.Status}}' ss-crm-backend 2>/dev/null || echo "not_found")
               echo "  Health check attempt $i/12: $STATUS"
-              
-              if [ "$STATUS" = "healthy" ]; then
-                echo "✅ CRM Backend is running and healthy!"
-                docker compose ps
-
-                # ── Traefik routing diagnostics ──
-                echo "── DIAG: DOMAIN_NAME check ──"
-                DN=$(grep '^DOMAIN_NAME=' .env.production | cut -d= -f2)
-                if [ "$DN" = "srv1169280.hstgr.cloud" ]; then echo "DOMAIN_NAME OK"; else echo "DOMAIN_NAME MISMATCH (len=${#DN})"; fi
-                echo "── DIAG: container networks ──"
-                docker inspect ss-crm-backend --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}'
-                echo "── DIAG: traefik containers ──"
-                docker ps --format '{{.Names}} | {{.Status}}' | grep -i traefik || echo "no traefik container found"
-                echo "── DIAG: available docker networks ──"
-                docker network ls --format '{{.Name}}'
-                echo "── DIAG: request via traefik with Host header ──"
-                curl -s -o /dev/null -w 'traefik->crm.backend host: %{http_code}\n' --max-time 5 -H "Host: crm.backend.srv1169280.hstgr.cloud" http://127.0.0.1/health || true
-                curl -sk -o /dev/null -w 'traefik https: %{http_code}\n' --max-time 5 --resolve crm.backend.srv1169280.hstgr.cloud:443:127.0.0.1 https://crm.backend.srv1169280.hstgr.cloud/health || true
-                echo "── DIAG: traefik discovered routers (if api enabled) ──"
-                TRAEFIK_NAME=$(docker ps --format '{{.Names}}' | grep -i traefik | head -1)
-                if [ -n "$TRAEFIK_NAME" ]; then
-                  docker exec $TRAEFIK_NAME wget -qO- http://127.0.0.1:8080/api/http/routers 2>/dev/null | tr ',' '\n' | grep -i 'crm-backend\|rule' | head -20 || echo "traefik api not reachable"
-                  echo "── DIAG: traefik recent logs ──"
-                  docker logs --tail 20 $TRAEFIK_NAME 2>&1 | tail -20
-                fi
-                exit 0
-              elif [ "$STATUS" = "unhealthy" ]; then
-                echo "🚨 Container is unhealthy! Fetching logs..."
-                docker compose logs --tail=50 crm-backend
-                docker compose stop crm-backend
-                exit 1
-              elif [ "$STATUS" = "not_found" ]; then
-                echo "🚨 Container not found! Build may have failed."
-                exit 1
-              fi
+              if [ "$STATUS" = "healthy" ]; then HEALTHY=1; break; fi
+              if [ "$STATUS" = "unhealthy" ]; then break; fi
             done
-            
-            echo "⚠️ Container did not become healthy within 60 seconds."
-            docker compose logs --tail=30 crm-backend
-            exit 1
+
+            if [ "$HEALTHY" != "1" ]; then
+              echo "🚨 New container failed health check! Logs:"
+              docker compose logs --tail=50 crm-backend || true
+              rollback
+              exit 1
+            fi
+            echo "✓ container healthy"
+
+            echo "⏳ Verifying public URLs through Traefik..."
+            EXT_OK=0
+            for i in $(seq 1 6); do
+              sleep 5
+              C1=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/leads" || echo 000)
+              C2=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/crm/todo" || echo 000)
+              C3=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/socket.io/?EIO=4&transport=polling" || echo 000)
+              echo "  Public check $i/6: /api/leads=$C1 /api/crm/todo=$C2 /socket.io=$C3"
+              if [ "$C1" = "200" ] && [ "$C2" = "200" ] && [ "$C3" = "200" ]; then EXT_OK=1; break; fi
+            done
+
+            if [ "$EXT_OK" != "1" ]; then
+              echo "🚨 Public URL verification FAILED — Traefik routing is broken for the new deploy."
+              echo "Container Traefik rules:"
+              docker inspect ss-crm-backend --format '{{json .Config.Labels}}' | tr ',' '\n' | grep -i 'rule' | head -6 || true
+              rollback
+              exit 1
+            fi
+
+            echo "✅ Deployment verified end-to-end: container healthy + all public URLs responding."
+            docker compose ps
+            exit 0
