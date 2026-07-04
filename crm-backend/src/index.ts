@@ -6857,7 +6857,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-const PORT = 3003;
+const PORT = 3005;
 const httpServer = createServer(app);
 
 export const io = new SocketIOServer(httpServer, {

@@ -19,9 +19,9 @@ RUN npm ci
 # Set working directory back to root
 WORKDIR /app
 
-# Expose the ports for both backends
-EXPOSE 3002
-EXPOSE 3003
+# Expose the ports for CRM backend (3004 for main API, 3005 for CRM API)
+EXPOSE 3004
+EXPOSE 3005
 
 # Command to run both servers and the sync daemon concurrently
 CMD ["npm", "run", "server"]
