@@ -23,12 +23,16 @@ jobs:
             # Navigate to CRM directory (create if it doesn't exist)
             mkdir -p /opt/ss-crm
             cd /opt/ss-crm
-            
-            # If git repo is not initialized, clone it
+
+            # If git repo is not initialized, clone using PAT token
             if [ ! -d ".git" ]; then
-              git clone https://github.com/safestories-tech/safestories-crm.git .
+              git init
+              git remote add origin https://${{ secrets.GH_PAT }}@github.com/safestories-tech/safestories-crm.git
+            else
+              # Update remote URL with fresh token on every deploy
+              git remote set-url origin https://${{ secrets.GH_PAT }}@github.com/safestories-tech/safestories-crm.git
             fi
-            
+
             # Pull latest changes
             git fetch --all
             git reset --hard origin/main
