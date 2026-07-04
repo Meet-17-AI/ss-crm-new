@@ -86,7 +86,13 @@ jobs:
             N8N_WEBHOOK_ISSUE_REPORT=${{ secrets.N8N_WEBHOOK_ISSUE_REPORT }}
             N8N_WEBHOOK_SOS_EMAIL=${{ secrets.N8N_WEBHOOK_SOS_EMAIL }}
             EOF
-            
+
+            # CRITICAL: docker compose interpolates ${DOMAIN_NAME} etc. in labels
+            # from .env (or shell env), NOT from env_file (.env.production).
+            # Without this, Traefik router rules become Host(`crm.backend.`)
+            # and every request 404s.
+            cp .env.production .env
+
             # Ensure the docker volume exists
             docker volume inspect crm_backend_data >/dev/null 2>&1 || docker volume create crm_backend_data
             
