@@ -223,6 +223,25 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
     return email;
   };
 
+  const formatSessionTiming = (timing: string | undefined | null) => {
+    if (!timing) return 'N/A';
+    const regex = /^(\w+),\s+([a-zA-Z]+)\s+(\d+)(?:st|nd|rd|th)?,\s+(\d+)\s+at\s+(.+?)\s+-/;
+    const match = timing.match(regex);
+    if (!match) return timing;
+    
+    const [ , dayFull, monthStr, dayNum, year, startTime ] = match;
+    const dayShort = dayFull.substring(0, 3);
+    const monthMap: Record<string, string> = {
+      'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun': '06',
+      'Jul': '07', 'Aug': '08', 'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+    };
+    const month = monthMap[monthStr] || '01';
+    const paddedDay = dayNum.padStart(2, '0');
+    const formattedStartTime = startTime.replace(/^0/, '').replace(/\s+/, '');
+    
+    return `(${dayShort}), ${paddedDay}/${month}/${year} - ${formattedStartTime}`;
+  };
+
   const formatClientName = (name: string): string => {
     if (!name) return name;
     return name
@@ -1888,11 +1907,13 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                 <table className="w-full" ref={appointmentActionsRef}>
                   <thead className="bg-gray-50 border-b">
                     <tr>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Timings</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Name</th>
                       <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Client Name</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Name</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Therapist Name</th>
                       <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Mode</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Timings</th>
                       <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Status</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Feedback Score</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1977,16 +1998,18 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                               }`}
                             onClick={() => setSelectedAppointmentIndex(selectedAppointmentIndex === index ? null : index)}
                           >
-                            <td className="px-6 py-4 text-sm">{appointment.session_timings}</td>
-                            <td className="px-6 py-4 text-sm">{appointment.session_name}</td>
-                            <td className="px-6 py-4 text-sm">
+                            <td className="px-6 py-4 text-sm whitespace-nowrap">
                               <span
-                                className="text-teal-700 hover:underline cursor-pointer"
+                                className="text-teal-700 hover:underline cursor-pointer font-medium"
                                 onClick={() => handleViewClientFromAppointment(appointment)}
                               >
                                 {formatClientName(appointment.client_name)}
                               </span>
+                              <div className="text-gray-500 text-xs mt-1">{appointment.client_phone || appointment.invitee_phone || appointment.contact_info}</div>
+                              <div className="text-gray-500 text-xs">{appointment.client_email || appointment.invitee_email}</div>
                             </td>
+                            <td className="px-6 py-4 text-sm">{appointment.session_name}</td>
+                            <td className="px-6 py-4 text-sm">{appointment.therapist_name || appointment.booking_host_name || user.full_name || user.username}</td>
                             <td className="px-6 py-4 text-sm">
                               {(() => {
                                 let displayMode = appointment.mode || 'Google Meet';
@@ -2000,6 +2023,7 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                                 return displayMode;
                               })()}
                             </td>
+                            <td className="px-6 py-4 text-sm">{formatSessionTiming(appointment.session_timings)}</td>
                             <td className="px-6 py-4 text-sm">
                               <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${getAppointmentStatus(appointment) === 'completed' ? 'bg-green-100 text-green-700' :
                                 getAppointmentStatus(appointment) === 'cancelled' ? 'bg-red-100 text-red-700' :
@@ -2012,10 +2036,13 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                                     getAppointmentStatus(appointment).charAt(0).toUpperCase() + getAppointmentStatus(appointment).slice(1)}
                               </span>
                             </td>
+                            <td className="px-6 py-4 text-sm">
+                              {appointment.client_rating ? `⭐ ${appointment.client_rating}/5` : 'N/A'}
+                            </td>
                           </tr>
                           {selectedAppointmentIndex === index && (
                             <tr className="bg-gray-100">
-                              <td colSpan={5} className="px-6 py-4">
+                              <td colSpan={7} className="px-6 py-4">
                                 <div className="flex gap-1.5 justify-center">
                                   <button
                                     onClick={() => copyAppointmentDetails(appointment)}
@@ -3325,9 +3352,12 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                       <thead className="bg-gray-50 border-b">
                         <tr>
                           <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Client Name</th>
-                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Therapy Type</th>
+                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Name</th>
+                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Therapist Name</th>
                           <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Mode</th>
                           <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Timings</th>
+                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Status</th>
+                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Feedback Score</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3345,16 +3375,19 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                                   }`}
                                 onClick={() => setSelectedBookingIndex(selectedBookingIndex === index ? null : index)}
                               >
-                                <td className="px-6 py-4">
+                                <td className="px-6 py-4 whitespace-nowrap">
                                   <span
-                                    className="text-teal-700 hover:underline cursor-pointer"
+                                    className="text-teal-700 hover:underline cursor-pointer font-medium text-sm"
                                     onClick={() => handleViewClientFromBooking(booking)}
                                   >
                                     {formatClientName(booking.client_name)}
                                   </span>
+                                  <div className="text-gray-500 text-xs mt-1">{booking.client_phone || booking.invitee_phone || booking.contact_info}</div>
+                                  <div className="text-gray-500 text-xs">{booking.client_email || booking.invitee_email}</div>
                                 </td>
-                                <td className="px-6 py-4">{booking.therapy_type}</td>
-                                <td className="px-6 py-4">
+                                <td className="px-6 py-4 text-sm">{booking.therapy_type}</td>
+                                <td className="px-6 py-4 text-sm">{user.full_name || user.username}</td>
+                                <td className="px-6 py-4 text-sm">
                                   <div className="flex items-center gap-2">
                                     <span>{booking.mode}</span>
                                     {booking.mode === 'Online' && booking.booking_joining_link && (
@@ -3374,11 +3407,15 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                                     )}
                                   </div>
                                 </td>
-                                <td className="px-6 py-4">{booking.session_timings}</td>
+                                <td className="px-6 py-4 text-sm">{formatSessionTiming(booking.session_timings)}</td>
+                                <td className="px-6 py-4 text-sm">
+                                  <span className="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-blue-100 text-blue-700">Scheduled</span>
+                                </td>
+                                <td className="px-6 py-4 text-sm">N/A</td>
                               </tr>
                               {selectedBookingIndex === index && (
                                 <tr className="bg-gray-100">
-                                  <td colSpan={4} className="px-6 py-4">
+                                  <td colSpan={7} className="px-6 py-4">
                                     <div className="flex gap-3 justify-center">
                                       <button
                                         onClick={() => {
@@ -3440,10 +3477,12 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                       <thead className="bg-gray-50 border-b">
                         <tr>
                           <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Client Name</th>
-                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Therapy Type</th>
-                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Timings</th>
+                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Name</th>
+                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Therapist Name</th>
                           <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Mode</th>
+                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Timings</th>
                           <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Status</th>
+                          <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Feedback Score</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3464,17 +3503,19 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                                     }`}
                                   onClick={() => setSelectedAppointmentIndex(selectedAppointmentIndex === index ? null : index)}
                                 >
-                                  <td className="px-6 py-4">
+                                  <td className="px-6 py-4 whitespace-nowrap">
                                     <span
-                                      className="text-teal-700 hover:underline cursor-pointer"
+                                      className="text-teal-700 hover:underline cursor-pointer font-medium text-sm"
                                       onClick={() => handleViewClientFromAppointment(appointment)}
                                     >
                                       {formatClientName(appointment.client_name)}
                                     </span>
+                                    <div className="text-gray-500 text-xs mt-1">{appointment.client_phone || appointment.invitee_phone || appointment.contact_info}</div>
+                                    <div className="text-gray-500 text-xs">{appointment.client_email || appointment.invitee_email}</div>
                                   </td>
-                                  <td className="px-6 py-4">{appointment.session_name}</td>
-                                  <td className="px-6 py-4 text-sm">{appointment.session_timings}</td>
-                                  <td className="px-6 py-4">
+                                  <td className="px-6 py-4 text-sm">{appointment.session_name}</td>
+                                  <td className="px-6 py-4 text-sm">{appointment.therapist_name || appointment.booking_host_name || user.full_name || user.username}</td>
+                                  <td className="px-6 py-4 text-sm">
                                     {(() => {
                                       let displayMode = appointment.mode || 'Google Meet';
                                       if (appointment.mode?.includes('_')) {
@@ -3487,15 +3528,19 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
                                       return displayMode;
                                     })()}
                                   </td>
+                                  <td className="px-6 py-4 text-sm">{formatSessionTiming(appointment.session_timings)}</td>
                                   <td className="px-6 py-4">
                                     <span className="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-yellow-100 text-yellow-700">
                                       Pending Notes
                                     </span>
                                   </td>
+                                  <td className="px-6 py-4 text-sm">
+                                    {appointment.client_rating ? `⭐ ${appointment.client_rating}/5` : 'N/A'}
+                                  </td>
                                 </tr>
                                 {selectedAppointmentIndex === index && (
                                   <tr className="bg-gray-100">
-                                    <td colSpan={5} className="px-6 py-4">
+                                    <td colSpan={7} className="px-6 py-4">
                                       <div className="flex flex-wrap gap-2 justify-center">
                                         <button
                                           onClick={() => copyAppointmentDetails(appointment)}

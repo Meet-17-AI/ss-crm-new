@@ -1,0 +1,113 @@
+name: Deploy CRM Backend to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            # Navigate to CRM directory (create if it doesn't exist)
+            mkdir -p /opt/ss-crm
+            cd /opt/ss-crm
+            
+            # If git repo is not initialized, clone it
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/safestories-tech/safestories-crm.git .
+            fi
+            
+            # Pull latest changes
+            git fetch --all
+            git reset --hard origin/main
+            
+            # Create .env.production file from GitHub Secrets
+            cat > .env.production << 'EOF'
+            NODE_ENV=production
+            PORT=3002
+            
+            # Database
+            PGHOST=${{ secrets.PGHOST }}
+            PGPORT=${{ secrets.PGPORT }}
+            PGDATABASE=${{ secrets.PGDATABASE }}
+            PGUSER=${{ secrets.PGUSER }}
+            PGPASSWORD=${{ secrets.PGPASSWORD }}
+            
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_PORT=${{ secrets.DB_PORT }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            
+            # Frontend & Domain
+            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+            
+            # MinIO
+            MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }}
+            MINIO_PORT=${{ secrets.MINIO_PORT }}
+            MINIO_ACCESS_KEY=${{ secrets.MINIO_ACCESS_KEY }}
+            MINIO_SECRET_KEY=${{ secrets.MINIO_SECRET_KEY }}
+            MINIO_BUCKET_NAME=${{ secrets.MINIO_BUCKET_NAME }}
+            MINIO_USE_SSL=${{ secrets.MINIO_USE_SSL }}
+            
+            # Razorpay
+            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
+            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
+            
+            # Gmail
+            GMAIL_USER=${{ secrets.GMAIL_USER }}
+            GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}
+            
+            # Webhooks
+            N8N_WEBHOOK_FETCH_SLOTS_PUBLIC=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_PUBLIC }}
+            N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT }}
+            N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT }}
+            N8N_WEBHOOK_CREATE_BOOKING_PUBLIC=${{ secrets.N8N_WEBHOOK_CREATE_BOOKING_PUBLIC }}
+            N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT=${{ secrets.N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT }}
+            N8N_WEBHOOK_CANCEL_BOOKING=${{ secrets.N8N_WEBHOOK_CANCEL_BOOKING }}
+            N8N_WEBHOOK_RESCHEDULE_BOOKING=${{ secrets.N8N_WEBHOOK_RESCHEDULE_BOOKING }}
+            N8N_WEBHOOK_ISSUE_REPORT=${{ secrets.N8N_WEBHOOK_ISSUE_REPORT }}
+            N8N_WEBHOOK_SOS_EMAIL=${{ secrets.N8N_WEBHOOK_SOS_EMAIL }}
+            EOF
+            
+            # Ensure the docker volume exists
+            docker volume inspect crm_backend_data >/dev/null 2>&1 || docker volume create crm_backend_data
+            
+            # Rebuild and restart the container
+            echo "🚀 Building crm-backend..."
+            docker compose build crm-backend
+            
+            echo "🔄 Starting crm-backend (rolling update)..."
+            docker compose up -d crm-backend
+            
+            # Verify status and rollback if needed
+            echo "⏳ Verifying container health..."
+            sleep 15
+            
+            STATUS=$(docker inspect --format='{{json .State.Health.Status}}' ss-crm-backend 2>/dev/null || echo "unknown")
+            if [ "$STATUS" = "\"unhealthy\"" ]; then
+              echo "🚨 Container health check failed! Fetching logs..."
+              docker compose logs --tail=50 crm-backend
+              
+              # Rolling back by restoring previous image if exists, or stopping
+              echo "🔄 Reverting deployment..."
+              # Docker compose in start-first mode handles rollback if configured,
+              # but as an additional safety net we can stop the failing container.
+              docker compose stop crm-backend
+              exit 1
+            else
+              echo "✅ CRM Backend is running and healthy!"
+              docker compose ps
+            fi

@@ -101,6 +101,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, user }) => {
   ]);
   const [bookings, setBookings] = useState<any[]>([]);
 
+  const formatSessionTiming = (timing: string | undefined | null) => {
+    if (!timing) return 'N/A';
+    const regex = /^(\w+),\s+([a-zA-Z]+)\s+(\d+)(?:st|nd|rd|th)?,\s+(\d+)\s+at\s+(.+?)\s+-/;
+    const match = timing.match(regex);
+    if (!match) return timing;
+    
+    const [ , dayFull, monthStr, dayNum, year, startTime ] = match;
+    const dayShort = dayFull.substring(0, 3);
+    const monthMap: Record<string, string> = {
+      'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun': '06',
+      'Jul': '07', 'Aug': '08', 'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+    };
+    const month = monthMap[monthStr] || '01';
+    const paddedDay = dayNum.padStart(2, '0');
+    const formattedStartTime = startTime.replace(/^0/, '').replace(/\s+/, '');
+    
+    return `(${dayShort}), ${paddedDay}/${month}/${year} - ${formattedStartTime}`;
+  };
+
   const formatClientName = (name: string): string => {
     if (!name) return name;
     return name
@@ -721,16 +740,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, user }) => {
                   <thead className="bg-gray-50 border-b">
                     <tr>
                       <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Client Name</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Therapy Type</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Name</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Therapist Name</th>
                       <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Mode</th>
-                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Assigned Therapist</th>
                       <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Timings</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Status</th>
+                      <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Feedback Score</th>
                     </tr>
                   </thead>
                   <tbody>
                     {bookings.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-20 text-center text-gray-400">
+                        <td colSpan={7} className="px-6 py-20 text-center text-gray-400">
                           No upcoming sessions
                         </td>
                       </tr>
@@ -758,9 +779,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, user }) => {
                               >
                                 {formatClientName(booking.client_name)}
                               </button>
+                              <div className="text-gray-500 text-xs mt-1">{booking.client_phone || booking.invitee_phone || booking.contact_info}</div>
+                              <div className="text-gray-500 text-xs">{booking.client_email || booking.invitee_email}</div>
                             </td>
-                            <td className="px-6 py-4">{booking.therapy_type}</td>
-                            <td className="px-6 py-4">
+                            <td className="px-6 py-4 text-sm">{booking.therapy_type}</td>
+                            <td className="px-6 py-4 text-sm">{booking.therapist_name}</td>
+                            <td className="px-6 py-4 text-sm">
                               <div className="flex items-center gap-2">
                                 <span>{booking.mode}</span>
                                 {booking.mode === 'Online' && booking.booking_joining_link && (
@@ -780,12 +804,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onLogout, user }) => {
                                 )}
                               </div>
                             </td>
-                            <td className="px-6 py-4">{booking.therapist_name}</td>
-                            <td className="px-6 py-4">{booking.booking_start_at}</td>
+                            <td className="px-6 py-4 text-sm">{formatSessionTiming(booking.booking_start_at)}</td>
+                            <td className="px-6 py-4 text-sm">
+                              <span className="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-blue-100 text-blue-700">Scheduled</span>
+                            </td>
+                            <td className="px-6 py-4 text-sm">N/A</td>
                           </tr>
                           {selectedBookingIndex === index && (
                             <tr className="bg-gray-100">
-                              <td colSpan={5} className="px-6 py-4">
+                              <td colSpan={7} className="px-6 py-4">
                                 <div className="flex gap-2 justify-center items-center">
                                   <button
                                     onClick={() => copyBookingDetails(booking)}

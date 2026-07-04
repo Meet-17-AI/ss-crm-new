@@ -495,9 +495,28 @@ ${apt.booking_mode} joining info${apt.booking_joining_link ? `\nVideo call link:
     XLSX.writeFile(wb, `appointments_export_${new Date().toISOString().split('T')[0]}.xlsx`)
   };
 
-  // Formats raw datetime string as "Monday, March 30th, 2026" and "10:00 AM - 10:50 AM"
+  // Formats raw datetime string as "(Mon), 30/06/2026 - 4:30PM"
+  const formatSessionTiming = (timing: string | undefined | null) => {
+    if (!timing) return 'N/A';
+    const regex = /^(\w+),\s+([a-zA-Z]+)\s+(\d+)(?:st|nd|rd|th)?,\s+(\d+)\s+at\s+(.+?)\s+-/;
+    const match = timing.match(regex);
+    if (!match) return timing;
+    
+    const [ , dayFull, monthStr, dayNum, year, startTime ] = match;
+    const dayShort = dayFull.substring(0, 3);
+    const monthMap: Record<string, string> = {
+      'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 'May': '05', 'Jun': '06',
+      'Jul': '07', 'Aug': '08', 'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+    };
+    const month = monthMap[monthStr] || '01';
+    const paddedDay = dayNum.padStart(2, '0');
+    const formattedStartTime = startTime.replace(/^0/, '').replace(/\s+/, '');
+    
+    return `(${dayShort}), ${paddedDay}/${month}/${year} - ${formattedStartTime}`;
+  };
+
   const formatCurrentDateTime = (apt: Appointment) => {
-    return apt.booking_start_at || 'N/A';
+    return formatSessionTiming(apt.booking_start_at);
   };
 
   return (
@@ -673,13 +692,13 @@ ${apt.booking_mode} joining info${apt.booking_joining_link ? `\nVideo call link:
                       />
                     </th>
                   )}
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Timings</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Name</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Client Name</th>
-                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Contact Info</th>
+                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Name</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Therapist Name</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Mode</th>
+                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Session Timings</th>
                   <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Status</th>
+                  <th className="px-6 py-3 text-left text-sm font-medium text-gray-600">Feedback Score</th>
                 </tr>
               </thead>
               <tbody>
@@ -710,8 +729,6 @@ ${apt.booking_mode} joining info${apt.booking_joining_link ? `\nVideo call link:
                             />
                           </td>
                         )}
-                        <td className="px-6 py-4 text-sm">{apt.booking_start_at}</td>
-                        <td className="px-6 py-4 text-sm">{getSessionName(apt)}</td>
                         <td className="px-6 py-4 text-sm whitespace-nowrap">
                           <button
                             onClick={(e) => {
@@ -728,13 +745,13 @@ ${apt.booking_mode} joining info${apt.booking_joining_link ? `\nVideo call link:
                           >
                             {apt.invitee_name}
                           </button>
-                        </td>
-                        <td className="px-6 py-4 text-sm">
-                          <div>{apt.invitee_phone}</div>
+                          <div className="text-gray-500 text-xs mt-1">{apt.invitee_phone}</div>
                           <div className="text-gray-500 text-xs">{apt.invitee_email}</div>
                         </td>
+                        <td className="px-6 py-4 text-sm">{getSessionName(apt)}</td>
                         <td className="px-6 py-4 text-sm">{apt.booking_host_name}</td>
                         <td className="px-6 py-4 text-sm">{formatMode(apt.booking_mode)}</td>
+                        <td className="px-6 py-4 text-sm">{formatSessionTiming(apt.booking_start_at)}</td>
                         <td className="px-6 py-4 text-sm">
                           <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${getAppointmentStatus(apt) === 'completed' ? 'bg-green-100 text-green-700' :
                               getAppointmentStatus(apt) === 'cancelled' ? 'bg-red-100 text-red-700' :
@@ -746,6 +763,9 @@ ${apt.booking_mode} joining info${apt.booking_joining_link ? `\nVideo call link:
                               getAppointmentStatus(apt) === 'no_show' ? 'No Show' :
                                 getAppointmentStatus(apt).charAt(0).toUpperCase() + getAppointmentStatus(apt).slice(1)}
                           </span>
+                        </td>
+                        <td className="px-6 py-4 text-sm">
+                          {apt.client_rating ? `⭐ ${apt.client_rating}/5` : 'N/A'}
                         </td>
                       </tr>
                       {selectedRowIndex === index && (

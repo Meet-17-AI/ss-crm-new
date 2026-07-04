@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  crm-backend:
+    container_name: ss-crm-backend
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    healthcheck:
+      test: ["CMD", "node", "-e", "const req = require('http').request({ host: '127.0.0.1', port: 3002, path: '/health', timeout: 2000 }, (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.end();"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    labels:
+      - traefik.enable=true
+      
+      # Main Backend Router (port 3002) - Matches /api (excluding /api/crm)
+      - traefik.http.routers.crm-backend-main.rule=Host(`crm.backend.vpshost`) && PathPrefix(`/api`) && !PathPrefix(`/api/crm`)
+      - traefik.http.routers.crm-backend-main.tls=true
+      - traefik.http.routers.crm-backend-main.entrypoints=web,websecure
+      - traefik.http.routers.crm-backend-main.tls.certresolver=mytlschallenge
+      - traefik.http.routers.crm-backend-main.service=crm-backend-main-service
+      - traefik.http.services.crm-backend-main-service.loadbalancer.server.port=3002
+
+      # CRM Backend Router (port 3003) - Matches /api/crm
+      - traefik.http.routers.crm-backend-crm.rule=Host(`crm.backend.vpshost`) && PathPrefix(`/api/crm`)
+      - traefik.http.routers.crm-backend-crm.tls=true
+      - traefik.http.routers.crm-backend-crm.entrypoints=web,websecure
+      - traefik.http.routers.crm-backend-crm.tls.certresolver=mytlschallenge
+      - traefik.http.routers.crm-backend-crm.service=crm-backend-crm-service
+      - traefik.http.services.crm-backend-crm-service.loadbalancer.server.port=3003
+
+      # Middlewares and headers
+      - traefik.http.middlewares.crm-backend.headers.SSLRedirect=true
+      - traefik.http.middlewares.crm-backend.headers.STSSeconds=315360000
+      - traefik.http.middlewares.crm-backend.headers.browserXSSFilter=true
+      - traefik.http.middlewares.crm-backend.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.crm-backend.headers.forceSTSHeader=true
+      - traefik.http.middlewares.crm-backend.headers.SSLHost=crm.backend.vpshost
+      - traefik.http.middlewares.crm-backend.headers.STSIncludeSubdomains=true
+      - traefik.http.middlewares.crm-backend.headers.STSPreload=true
+      - traefik.http.routers.crm-backend-main.middlewares=crm-backend@docker
+      - traefik.http.routers.crm-backend-crm.middlewares=crm-backend@docker
+      - traefik.docker.network=root_default
+
+    environment:
+      - NODE_ENV=production
+      - PGHOST=${PGHOST}
+      - PGPORT=${PGPORT}
+      - PGDATABASE=${PGDATABASE}
+      - PGUSER=${PGUSER}
+      - PGPASSWORD=${PGPASSWORD}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
+      - MINIO_PORT=${MINIO_PORT}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME}
+      - MINIO_USE_SSL=${MINIO_USE_SSL}
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}
+      - GMAIL_USER=${GMAIL_USER}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
+      - N8N_WEBHOOK_FETCH_SLOTS_PUBLIC=${N8N_WEBHOOK_FETCH_SLOTS_PUBLIC}
+      - N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT=${N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT}
+      - N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT=${N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT}
+      - N8N_WEBHOOK_CREATE_BOOKING_PUBLIC=${N8N_WEBHOOK_CREATE_BOOKING_PUBLIC}
+      - N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT=${N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT}
+      - N8N_WEBHOOK_CANCEL_BOOKING=${N8N_WEBHOOK_CANCEL_BOOKING}
+      - N8N_WEBHOOK_RESCHEDULE_BOOKING=${N8N_WEBHOOK_RESCHEDULE_BOOKING}
+      - N8N_WEBHOOK_ISSUE_REPORT=${N8N_WEBHOOK_ISSUE_REPORT}
+      - N8N_WEBHOOK_SOS_EMAIL=${N8N_WEBHOOK_SOS_EMAIL}
+    restart: always
+    deploy:
+      update_config:
+        order: start-first
+        failure_action: rollback
+        delay: 5s
+      rollback_config:
+        order: start-first
+    networks:
+      - default
+      - root_default
+    volumes:
+      - crm_backend_data:/app/logs
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  crm_backend_data:
+    external: true
+
+networks:
+  root_default:
+    external: true
