@@ -1764,35 +1764,44 @@ app.get('/api/analytics', async (req, res) => {
     }
 
     // Calculate stats with optional month filter for the top stat cards
-    const totalLeadsRes = await pool.query(`SELECT COUNT(*) as count FROM leads ${statsWhereClause}`, statsQueryParams);
-    const sourcesRes = await pool.query(`SELECT source as name, COUNT(*) as value FROM leads ${sourceWhereClause} GROUP BY source`, sourceQueryParams);
+    // Filter out direct bookings (booking_system source) to match leads tab
+    const statsWhereWithFilter = statsWhereClause
+      ? statsWhereClause + " AND source != 'booking_system'"
+      : "WHERE source != 'booking_system'";
+    const sourceWhereWithFilter = sourceWhereClause
+      ? sourceWhereClause + " AND source != 'booking_system'"
+      : "WHERE source != 'booking_system'";
+
+    const totalLeadsRes = await pool.query(`SELECT COUNT(*) as count FROM leads ${statsWhereWithFilter}`, statsQueryParams);
+    const sourcesRes = await pool.query(`SELECT source as name, COUNT(*) as value FROM leads ${sourceWhereWithFilter} GROUP BY source`, sourceQueryParams);
 
     // Build funnel query: each stage filtered by its own timestamp column
+    // Filter out direct bookings (booking_system source) to match leads tab
     let funnelRes;
     if (funnelQueryParams.length === 2) {
       const [fMonth, fYear] = funnelQueryParams;
       funnelRes = await pool.query(`
         SELECT stage, COUNT(*) as value FROM (
-          SELECT 'lead-inquire' as stage FROM leads WHERE EXTRACT(MONTH FROM COALESCE(stage_lead_inquire_at, created_at)) = $1 AND EXTRACT(YEAR FROM COALESCE(stage_lead_inquire_at, created_at)) = $2
+          SELECT 'lead-inquire' as stage FROM leads WHERE source != 'booking_system' AND EXTRACT(MONTH FROM COALESCE(stage_lead_inquire_at, created_at)) = $1 AND EXTRACT(YEAR FROM COALESCE(stage_lead_inquire_at, created_at)) = $2
           UNION ALL
-          SELECT 'pretherapy-call' FROM leads WHERE stage_pretherapy_call_at IS NOT NULL AND EXTRACT(MONTH FROM stage_pretherapy_call_at) = $1 AND EXTRACT(YEAR FROM stage_pretherapy_call_at) = $2
+          SELECT 'pretherapy-call' FROM leads WHERE source != 'booking_system' AND stage_pretherapy_call_at IS NOT NULL AND EXTRACT(MONTH FROM stage_pretherapy_call_at) = $1 AND EXTRACT(YEAR FROM stage_pretherapy_call_at) = $2
           UNION ALL
-          SELECT 'followup-1' FROM leads WHERE stage_followup_1_at IS NOT NULL AND EXTRACT(MONTH FROM stage_followup_1_at) = $1 AND EXTRACT(YEAR FROM stage_followup_1_at) = $2
+          SELECT 'followup-1' FROM leads WHERE source != 'booking_system' AND stage_followup_1_at IS NOT NULL AND EXTRACT(MONTH FROM stage_followup_1_at) = $1 AND EXTRACT(YEAR FROM stage_followup_1_at) = $2
           UNION ALL
-          SELECT 'booked-first-session' FROM leads WHERE stage_booked_first_session_at IS NOT NULL AND EXTRACT(MONTH FROM stage_booked_first_session_at) = $1 AND EXTRACT(YEAR FROM stage_booked_first_session_at) = $2
+          SELECT 'booked-first-session' FROM leads WHERE source != 'booking_system' AND stage_booked_first_session_at IS NOT NULL AND EXTRACT(MONTH FROM stage_booked_first_session_at) = $1 AND EXTRACT(YEAR FROM stage_booked_first_session_at) = $2
           UNION ALL
-          SELECT 'referred' FROM leads WHERE stage_referred_at IS NOT NULL AND EXTRACT(MONTH FROM stage_referred_at) = $1 AND EXTRACT(YEAR FROM stage_referred_at) = $2
+          SELECT 'referred' FROM leads WHERE source != 'booking_system' AND stage_referred_at IS NOT NULL AND EXTRACT(MONTH FROM stage_referred_at) = $1 AND EXTRACT(YEAR FROM stage_referred_at) = $2
           UNION ALL
-          SELECT 'closed' FROM leads WHERE stage_closed_at IS NOT NULL AND EXTRACT(MONTH FROM stage_closed_at) = $1 AND EXTRACT(YEAR FROM stage_closed_at) = $2
+          SELECT 'closed' FROM leads WHERE source != 'booking_system' AND stage_closed_at IS NOT NULL AND EXTRACT(MONTH FROM stage_closed_at) = $1 AND EXTRACT(YEAR FROM stage_closed_at) = $2
           UNION ALL
-          SELECT 'dropouts' FROM leads WHERE stage_dropouts_at IS NOT NULL AND EXTRACT(MONTH FROM stage_dropouts_at) = $1 AND EXTRACT(YEAR FROM stage_dropouts_at) = $2
+          SELECT 'dropouts' FROM leads WHERE source != 'booking_system' AND stage_dropouts_at IS NOT NULL AND EXTRACT(MONTH FROM stage_dropouts_at) = $1 AND EXTRACT(YEAR FROM stage_dropouts_at) = $2
           UNION ALL
-          SELECT 'leaks' FROM leads WHERE stage_leaks_at IS NOT NULL AND EXTRACT(MONTH FROM stage_leaks_at) = $1 AND EXTRACT(YEAR FROM stage_leaks_at) = $2
+          SELECT 'leaks' FROM leads WHERE source != 'booking_system' AND stage_leaks_at IS NOT NULL AND EXTRACT(MONTH FROM stage_leaks_at) = $1 AND EXTRACT(YEAR FROM stage_leaks_at) = $2
         ) t GROUP BY stage
       `, [fMonth, fYear]);
     } else {
-      // No month filter — show all leads grouped by current stage
-      funnelRes = await pool.query(`SELECT pipeline_stage as stage, COUNT(*) as value FROM leads GROUP BY pipeline_stage`);
+      // No month filter — show all leads grouped by current stage, excluding direct bookings
+      funnelRes = await pool.query(`SELECT pipeline_stage as stage, COUNT(*) as value FROM leads WHERE source != 'booking_system' GROUP BY pipeline_stage`);
     }
 
 
@@ -1815,23 +1824,23 @@ app.get('/api/analytics', async (req, res) => {
         : '';
 
     const allTimeDropoutsRes = await pool.query(
-      `SELECT COUNT(*) as count FROM leads WHERE pipeline_stage = 'dropouts' ${buildStageFilter('stage_dropouts_at')}`,
+      `SELECT COUNT(*) as count FROM leads WHERE source != 'booking_system' AND pipeline_stage = 'dropouts' ${buildStageFilter('stage_dropouts_at')}`,
       stageMonthParams
     );
     const allTimeLeaksRes = await pool.query(
-      `SELECT COUNT(*) as count FROM leads WHERE pipeline_stage = 'leaks' ${buildStageFilter('stage_leaks_at')}`,
+      `SELECT COUNT(*) as count FROM leads WHERE source != 'booking_system' AND pipeline_stage = 'leaks' ${buildStageFilter('stage_leaks_at')}`,
       stageMonthParams
     );
     const allTimeClosedRes = await pool.query(
-      `SELECT COUNT(*) as count FROM leads WHERE pipeline_stage = 'closed' ${buildStageFilter('stage_closed_at')}`,
+      `SELECT COUNT(*) as count FROM leads WHERE source != 'booking_system' AND pipeline_stage = 'closed' ${buildStageFilter('stage_closed_at')}`,
       stageMonthParams
     );
     const allTimeBookedRes = await pool.query(
-      `SELECT COUNT(*) as count FROM leads WHERE stage_booked_first_session_at IS NOT NULL ${buildStageFilter('stage_booked_first_session_at')}`,
+      `SELECT COUNT(*) as count FROM leads WHERE source != 'booking_system' AND stage_booked_first_session_at IS NOT NULL ${buildStageFilter('stage_booked_first_session_at')}`,
       stageMonthParams
     );
     const allTimeReferredRes = await pool.query(
-      `SELECT COUNT(*) as count FROM leads WHERE pipeline_stage = 'referred' ${buildStageFilter('stage_referred_at')}`,
+      `SELECT COUNT(*) as count FROM leads WHERE source != 'booking_system' AND pipeline_stage = 'referred' ${buildStageFilter('stage_referred_at')}`,
       stageMonthParams
     );
 
