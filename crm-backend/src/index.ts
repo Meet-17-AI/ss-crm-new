@@ -6873,7 +6873,7 @@ io.on('connection', (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`\nAPI server running on http://localhost:${PORT}`);
   startDashboardApiBookingSync();
 }).on('error', (err: any) => {
