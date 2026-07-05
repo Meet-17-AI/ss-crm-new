@@ -48,11 +48,13 @@ export async function handleBookingConfirmedWebhook(req: any, res: any) {
     // Find matching lead by email or phone (normalized)
     let leadResult = await client.query(
       `SELECT id, name, sales_agent_id FROM leads
-       WHERE ( (RIGHT(REGEXP_REPLACE(COALESCE(phone,''), '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE($2, '\\D', '', 'g'), 10) AND REGEXP_REPLACE($2, '\\D', '', 'g') <> '')
+       WHERE ( (RIGHT(REGEXP_REPLACE(COALESCE(phone,''), '\\\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE($2, '\\\\D', '', 'g'), 10) AND REGEXP_REPLACE($2, '\\\\D', '', 'g') <> '')
             OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND COALESCE(TRIM($1),'') <> '') )
        AND is_duplicate = FALSE
        AND pipeline_stage != 'booked-first-session'
-       ORDER BY created_at DESC
+       ORDER BY 
+         CASE WHEN source = 'booking_system' THEN 1 ELSE 0 END ASC,
+         created_at DESC
        LIMIT 1`,
       [invitee_email || '', invitee_phone || '']
     );
@@ -86,18 +88,21 @@ export async function handleBookingConfirmedWebhook(req: any, res: any) {
       }
     }
 
-    // Move lead to "Booked First Session" if not already there
+    // Move lead to "Booked First Session" if not already there and enrich
     const updateResult = await client.query(
       `UPDATE leads
        SET pipeline_stage = 'booked-first-session',
            stage_booked_first_session_at = NOW(),
            therapist_id = $1,
            booking_id = $2,
+           email = COALESCE(NULLIF(email, ''), $4),
+           phone = COALESCE(NULLIF(phone, ''), $5),
+           name = CASE WHEN LENGTH(COALESCE($6, '')) > LENGTH(COALESCE(name, '')) THEN $6 ELSE name END,
            updated_at = NOW()
        WHERE id = $3
        AND pipeline_stage != 'booked-first-session'
        RETURNING id, pipeline_stage`,
-      [mappedTherapistId, booking_id, leadId]
+      [mappedTherapistId, booking_id, leadId, invitee_email || null, invitee_phone || null, invitee_name || null]
     );
 
     // Log interaction

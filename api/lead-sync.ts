@@ -187,12 +187,17 @@ async function syncBookingsToLeads(client: any, syncId: number) {
           matchType = 'new_lead';
           recordsCreated++;
         } else {
-          // Update existing lead
+          // Update existing lead and enrich missing details
           await client.query(
             `UPDATE leads
-             SET booking_id = $1, sync_status = 'synced', updated_at = NOW()
+             SET booking_id = $1, 
+                 sync_status = 'synced', 
+                 email = COALESCE(NULLIF(email, ''), $3),
+                 phone = COALESCE(NULLIF(phone, ''), $4),
+                 name = CASE WHEN LENGTH(COALESCE($5, '')) > LENGTH(COALESCE(name, '')) THEN $5 ELSE name END,
+                 updated_at = NOW()
              WHERE id = $2`,
-            [booking.booking_id, leadId]
+            [booking.booking_id, leadId, booking.invitee_email || null, booking.invitee_phone || null, booking.invitee_name || null]
           );
           recordsUpdated++;
         }
