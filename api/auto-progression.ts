@@ -45,15 +45,16 @@ export async function handleBookingConfirmedWebhook(req: any, res: any) {
 
     await client.query('BEGIN');
 
-    // Find matching lead by email or phone
+    // Find matching lead by email or phone (normalized)
     let leadResult = await client.query(
       `SELECT id, name, sales_agent_id FROM leads
-       WHERE (email = $1 OR phone = $2)
+       WHERE ( (RIGHT(REGEXP_REPLACE(COALESCE(phone,''), '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE($2, '\\D', '', 'g'), 10) AND REGEXP_REPLACE($2, '\\D', '', 'g') <> '')
+            OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND COALESCE(TRIM($1),'') <> '') )
        AND is_duplicate = FALSE
        AND pipeline_stage != 'booked-first-session'
        ORDER BY created_at DESC
        LIMIT 1`,
-      [invitee_email, invitee_phone]
+      [invitee_email || '', invitee_phone || '']
     );
 
     let leadId: string;

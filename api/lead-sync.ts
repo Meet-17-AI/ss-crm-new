@@ -151,29 +151,25 @@ async function syncBookingsToLeads(client: any, syncId: number) {
       recordsProcessed++;
 
       try {
-        // Try to find matching lead by email first, then phone
-        let leadResult = await client.query(
+        // Find an existing lead using NORMALIZED matching (last-10-digit phone
+        // + case-insensitive email), identical to the new-booking webhook.
+        // Exact string matching missed leads stored in a different phone
+        // format (e.g. "1236549877" vs "+911236549877") or without an email,
+        // which caused a duplicate source='booking_system' lead to be created
+        // for a client who already had a real CRM lead — and that duplicate is
+        // hidden from the pipeline, so the real lead appeared "not moved".
+        const leadResult = await client.query(
           `SELECT id FROM leads
-           WHERE email = $1 OR phone = $2
+           WHERE ( (RIGHT(REGEXP_REPLACE(COALESCE(phone,''), '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE($1, '\\D', '', 'g'), 10) AND REGEXP_REPLACE($1, '\\D', '', 'g') <> '')
+                OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND COALESCE(TRIM($2),'') <> '') )
            ORDER BY created_at DESC
            LIMIT 1`,
-          [booking.invitee_email, booking.invitee_phone]
+          [booking.invitee_phone || '', booking.invitee_email || '']
         );
 
         let leadId = leadResult.rows[0]?.id;
-        let matchType = 'email_match';
-        let matchScore = 0.95;
-
-        if (!leadId && booking.invitee_phone) {
-          // Try phone match
-          leadResult = await client.query(
-            `SELECT id FROM leads WHERE phone = $1 LIMIT 1`,
-            [booking.invitee_phone]
-          );
-          leadId = leadResult.rows[0]?.id;
-          matchType = 'phone_match';
-          matchScore = 0.85;
-        }
+        let matchType = leadId ? 'normalized_match' : 'new_lead';
+        let matchScore = leadId ? 0.9 : 0;
 
         if (!leadId) {
           // Create new lead from booking
@@ -219,36 +215,14 @@ async function syncBookingsToLeads(client: any, syncId: number) {
           ]
         );
 
-        // Auto-progress lead to "Booked First Session" if it's a first session booking
-        if (booking.booking_status === 'confirmed' || booking.booking_status === 'completed') {
-          let mappedTherapistId = null;
-          if (booking.therapist_id) {
-            const therapistUserResult = await client.query(
-              `SELECT id FROM users WHERE therapist_id = $1 AND role = 'therapist' LIMIT 1`,
-              [booking.therapist_id.toString()]
-            );
-            if (therapistUserResult.rows.length > 0) {
-              mappedTherapistId = therapistUserResult.rows[0].id;
-            }
-          }
-
-          await client.query(
-            `UPDATE leads
-             SET pipeline_stage = 'booked-first-session',
-                 stage_booked_first_session_at = NOW(),
-                 therapist_id = $1
-             WHERE id = $2
-             AND pipeline_stage != 'booked-first-session'`,
-            [mappedTherapistId, leadId]
-          );
-
-          // Log interaction
-          await client.query(
-            `INSERT INTO interaction_log (lead_id, interaction_type, interaction_detail, interacted_by)
-             VALUES ($1, 'stage_move', 'Auto-progressed from booking system', 'system_sync')`,
-            [leadId]
-          );
-        }
+        // NOTE: Stage progression is intentionally NOT done here. This sync
+        // used to force every confirmed booking to 'booked-first-session',
+        // which is wrong for free consultations (they must go to
+        // 'pretherapy-call') and raced the new-booking webhook. The webhook
+        // (/api/webhooks/new-booking) — invoked on booking creation and by the
+        // safety-net poller — is the single authority on lead movement and
+        // correctly distinguishes free vs paid bookings. This sync only links
+        // bookings to leads; it no longer moves them.
       } catch (itemError) {
         console.error(`Error processing booking ${booking.booking_id}:`, itemError);
         recordsFailed++;
