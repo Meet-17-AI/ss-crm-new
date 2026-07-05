@@ -162,7 +162,9 @@ async function syncBookingsToLeads(client: any, syncId: number) {
           `SELECT id FROM leads
            WHERE ( (RIGHT(REGEXP_REPLACE(COALESCE(phone,''), '\\D', '', 'g'), 10) = RIGHT(REGEXP_REPLACE($1, '\\D', '', 'g'), 10) AND REGEXP_REPLACE($1, '\\D', '', 'g') <> '')
                 OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND COALESCE(TRIM($2),'') <> '') )
-           ORDER BY created_at DESC
+           ORDER BY 
+             CASE WHEN source = 'booking_system' THEN 1 ELSE 0 END ASC,
+             created_at DESC
            LIMIT 1`,
           [booking.invitee_phone || '', booking.invitee_email || '']
         );
