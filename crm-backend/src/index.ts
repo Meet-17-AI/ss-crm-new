@@ -5159,8 +5159,7 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
           // Determine if it's a Free Consultation
           const isFreeConsultation = (booking.booking_resource_name || '').toLowerCase().includes('free consultation') || 
                                      (booking.booking_resource_name || '').toLowerCase().includes('pre-therapy') ||
-                                     (booking.booking_resource_name || '').toLowerCase().includes('pre therapy') ||
-                                     parseFloat(booking.invitee_payment_amount || '0') === 0;
+                                     (booking.booking_resource_name || '').toLowerCase().includes('pre therapy');
 
           // Find matching lead - normalizing phone for comparison
           const leadResult = await pool.query(
