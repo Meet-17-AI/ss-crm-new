@@ -5196,20 +5196,23 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
 
             if (targetStage && currentStage !== targetStage) {
               const dateStr = new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
-              const remark = `\n[System ${dateStr}]: Auto-moved to ${targetStage} due to booking ${booking_id} (${isFreeConsultation ? 'Free' : 'Paid'})`;
-              
+              const systemRemark = `[System ${dateStr}]: Auto-moved to ${targetStage} due to booking ${booking_id} (${isFreeConsultation ? 'Free' : 'Paid'})`;
+
               // Assign therapist from booking (using resolved internal ID)
               const therapistId = therapistInternalId || null;
 
+              // Update the stage-specific remark field (not remark_lead_manager) so
+              // the UI's "Stage Remarks" section shows the auto-move system message.
+              const stageRemarkKey = REMARK_COLUMN_MAP[targetStage];
               await pool.query(
-                `UPDATE leads 
-                 SET pipeline_stage = $1, 
+                `UPDATE leads
+                 SET pipeline_stage = $1,
                      ${timestampColumn} = CURRENT_TIMESTAMP,
-                     remark_lead_manager = COALESCE(remark_lead_manager, '') || $2,
+                     ${stageRemarkKey} = COALESCE(${stageRemarkKey}, '') || $2,
                      therapist_id = COALESCE($4, therapist_id),
                      updated_at = CURRENT_TIMESTAMP
                  WHERE id = $3`,
-                [targetStage, remark, lead.id, therapistId]
+                [targetStage, '\n' + systemRemark, lead.id, therapistId]
               );
               console.log(`✨ [Auto-Move] Lead "${lead.name}" (${lead.id}) moved: ${currentStage} → ${targetStage} (Therapist: ${therapistId || 'N/A'})`);
             }
@@ -5223,8 +5226,10 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
             );
             const salesAgentId = defaultManager.rows[0]?.id || null;
 
+            const dateStr = new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
+            const autoCreateRemark = `[System ${dateStr}]: Auto-created from Free Consultation booking ID: ${booking_id}`;
             await pool.query(
-              `INSERT INTO leads (name, phone, email, source, sales_agent_id, status, pipeline_stage, stage_pretherapy_call_at, remark_lead_manager)
+              `INSERT INTO leads (name, phone, email, source, sales_agent_id, status, pipeline_stage, stage_pretherapy_call_at, remark_pretherapy_call)
                VALUES ($1, $2, $3, $4, $5, 'New', 'pretherapy-call', CURRENT_TIMESTAMP, $6)`,
               [
                 booking.invitee_name,
@@ -5232,7 +5237,7 @@ app.post('/api/webhooks/new-booking', async (req, res) => {
                 booking.invitee_email || null,
                 'Free Consultation',
                 salesAgentId,
-                `Auto-created from Free Consultation booking ID: ${booking_id}`
+                autoCreateRemark
               ]
             );
             console.log(`✅ [Auto-Create] Lead for free consultation: "${booking.invitee_name}" (${booking.invitee_phone})`);
