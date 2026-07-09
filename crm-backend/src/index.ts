@@ -1151,7 +1151,7 @@ app.patch('/api/leads/:id/assign-therapist', async (req, res) => {
 });
 
 // Get all therapists for dropdown
-app.get('/api/therapists', async (req, res) => {
+app.get('/api/therapists-dropdown', async (req, res) => {
   try {
     const therapists = await pool.query(`
       SELECT id, name, full_name, therapist_id
