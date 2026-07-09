@@ -1142,10 +1142,11 @@ app.patch('/api/leads/:id/assign-therapist', async (req, res) => {
 app.get('/api/therapists-dropdown', async (req, res) => {
   try {
     const therapists = await pool.query(`
-      SELECT id, name, full_name, therapist_id
-      FROM users 
-      WHERE role = 'therapist' 
-      ORDER BY COALESCE(full_name, name)
+      SELECT u.id, u.name, u.full_name, u.therapist_id, t.specialization
+      FROM users u
+      LEFT JOIN therapists t ON u.therapist_id::text = t.therapist_id::text
+      WHERE u.role = 'therapist' 
+      ORDER BY COALESCE(u.full_name, u.name)
     `);
     res.json(therapists.rows);
   } catch (err) {
