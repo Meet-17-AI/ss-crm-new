@@ -185,22 +185,56 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
     }).length
   }
 
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'pm' : 'am';
+    hours = hours % 12;
+    hours = hours ? hours : 12; // the hour '0' should be '12'
+    const formattedTime = `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
+    return `${day}-${month}-${year} ${formattedTime}`;
+  };
+
+  const getMonthYearString = (dateString: string) => {
+    const date = new Date(dateString);
+    return `${date.toLocaleString('en-US', { month: 'long' })} ${date.getFullYear()}`;
+  };
+
   const exportToCSV = () => {
-    const headers = ['Lead Name', 'Phone', 'Email', 'Source', 'Lead Manager', 'Assigned Therapist', 'Stage', 'Aging'];
-    const rows = filteredLeads.map(lead => [
-      lead.name,
-      lead.phone,
-      lead.email,
-      lead.source,
-      lead.leadManager,
-      lead.assignedTherapist,
-      STAGE_LABEL[lead.stage] || lead.stage,
-      calculateAging(lead.createdDate)
-    ]);
+    const isAllTime = !selectedMonth || selectedMonth === 'All Time';
+    const headers = [];
+    if (isAllTime) {
+      headers.push('Month');
+    }
+    headers.push('Lead Name', 'Phone', 'Email', 'Source', 'Lead Manager', 'Assigned Therapist', 'Stage', 'Aging', 'Lead Created At');
+    
+    const rows = filteredLeads.map(lead => {
+      const row = [];
+      if (isAllTime) {
+        row.push(getMonthYearString(lead.createdDate));
+      }
+      row.push(
+        lead.name,
+        lead.phone,
+        lead.email,
+        lead.source,
+        lead.leadManager,
+        lead.assignedTherapist,
+        STAGE_LABEL[lead.stage] || lead.stage,
+        calculateAging(lead.createdDate),
+        formatDateTime(lead.createdDate)
+      );
+      return row;
+    });
+
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows])
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Leads')
-    XLSX.writeFile(wb, `crm_leads_${new Date().toISOString().split('T')[0]}.xlsx`)
+    XLSX.writeFile(wb, `crm_leads_${isAllTime ? 'All_Time' : selectedMonth.replace(' ', '_')}.xlsx`)
   };
 
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
