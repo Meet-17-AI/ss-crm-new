@@ -6,6 +6,7 @@ import { Toast } from '../../../components/Toast'
 import { SendBookingModal } from '../../../components/SendBookingModal'
 import { MoreVertical, Edit3 } from 'lucide-react'
 import PreTherapyCallFormModal, { PreTherapyFormData } from './PreTherapyCallFormModal'
+import StageRemarkModal from './StageRemarkModal'
 
 interface Lead {
     id: string
@@ -221,6 +222,7 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
     // Form views
     const [showFormResponses, setShowFormResponses] = useState(false)
     const [isEditingForm, setIsEditingForm] = useState(false)
+    const [isFollowupModalOpen, setIsFollowupModalOpen] = useState(false)
 
     const canActOnLead = (leadData: Lead | null): boolean => {
         if (!currentUser || !leadData) return false
@@ -426,6 +428,33 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
             console.error('Failed to save lead info', error)
             setToast({ message: 'Error saving lead info.', type: 'error' })
         }
+    }
+
+    const handleFollowupConfirm = async (remark: string, followUpDate?: string, futureAction?: string) => {
+        setToast({ message: 'Saving follow-up...', type: 'success' })
+        try {
+            const res = await fetch(`/api/leads/${leadId}/stage`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    pipeline_stage: 'followup-1', 
+                    remark, 
+                    follow_up_date: followUpDate || undefined, 
+                    future_action: futureAction || undefined 
+                })
+            })
+            if (res.ok) {
+                const updatedRes = await fetch(`/api/leads/${leadId}`)
+                if (updatedRes.ok) setLead(await updatedRes.json())
+                setToast({ message: 'Follow-up saved successfully!', type: 'success' })
+            } else {
+                setToast({ message: 'Failed to save follow-up.', type: 'error' })
+            }
+        } catch (error) {
+            console.error('Failed to save follow-up:', error)
+            setToast({ message: 'Error saving follow-up.', type: 'error' })
+        }
+        setIsFollowupModalOpen(false)
     }
 
     const handleEditFormSubmit = async (remark: string, formData: PreTherapyFormData) => {
@@ -930,7 +959,20 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
             </div>
 
             <div className="lead-profile-right">
-                <h2 className="lp-right-title">Stage Remarks</h2>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                    <h2 className="lp-right-title" style={{ margin: 0 }}>Stage Remarks</h2>
+                    {canAct && !lead.is_virtual && (
+                        <button 
+                            className="lp-convert-btn" 
+                            onClick={() => setIsFollowupModalOpen(true)}
+                            style={{ background: '#0f766e', color: 'white', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer', transition: 'all 0.2s' }}
+                            onMouseOver={(e) => e.currentTarget.style.background = '#0d9488'}
+                            onMouseOut={(e) => e.currentTarget.style.background = '#0f766e'}
+                        >
+                            Followup
+                        </button>
+                    )}
+                </div>
                 <div className="lp-remarks-list">
                     {lead.general_remarks && <StageRemarkCard lead={lead} isGeneral={true} canAct={canAct} />}
 
@@ -972,6 +1014,15 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
                 initialData={pretherapyForm}
                 onConfirm={handleEditFormSubmit}
                 onCancel={() => setIsEditingForm(false)}
+            />
+
+            <StageRemarkModal
+                isOpen={isFollowupModalOpen}
+                fromStage={lead.pipeline_stage}
+                toStage="followup-1"
+                leadName={lead.name}
+                onConfirm={handleFollowupConfirm}
+                onCancel={() => setIsFollowupModalOpen(false)}
             />
 
             <SendBookingModal
