@@ -76,13 +76,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
         queryParams.append('statsMonth', exportMonth);
       }
 
-      // Fetch KPI Data
-      const response = await fetch(`/api/analytics?${queryParams.toString()}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch KPI analytics data');
-      }
-      const data = await response.json();
-
       // Fetch Leads Data
       const leadsResponse = await fetch('/api/leads');
       if (!leadsResponse.ok) {
@@ -123,22 +116,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
 
       const wb = XLSX.utils.book_new();
 
-      // Sheet 1: KPI Summary
-      const kpiHeaders = ['Metric', 'Count'];
-      const kpiRows = [
-        ['Leads', data.totalLeads || 0],
-        ['Pre-therapy Booked', data.pretherapyBooked || 0],
-        ['Booked First Session', data.allTimeBookedCount || 0],
-        ['Unresponsive', data.dropouts || 0],
-        ['Closed', data.closed || 0],
-        ['Referred', data.referred || 0]
-      ];
-
-      const wsKpi = XLSX.utils.aoa_to_sheet([kpiHeaders, ...kpiRows]);
-      wsKpi['!cols'] = [{ wch: 25 }, { wch: 10 }];
-      XLSX.utils.book_append_sheet(wb, wsKpi, 'KPI Summary');
-
-      // Sheet 2: Leads Data
+      // Leads Data
       const leadsHeaders = [];
       if (isAllTime) leadsHeaders.push('Month');
       leadsHeaders.push('Lead Name', 'Phone', 'Email', 'Source', 'Lead Manager', 'Assigned Therapist', 'Stage', 'Aging', 'Lead Created At');
@@ -190,7 +168,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden">
         <div className="flex justify-between items-center p-6 border-b border-gray-100">
-          <h2 className="text-xl font-bold text-gray-900">Export KPI Summary</h2>
+          <h2 className="text-xl font-bold text-gray-900">Export Leads Data</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
             <X className="w-5 h-5" />
           </button>
@@ -212,7 +190,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
               <MonthFilter selectedMonth={exportMonth} onChange={setExportMonth} />
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              Exports the total counts of all KPIs for the selected month.
+              Exports the detailed leads data for the selected month.
             </p>
           </div>
         </div>
