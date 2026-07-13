@@ -6,7 +6,16 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config({ path: '.env.local' });
 
-const ENDPOINT = process.env.MINIO_ENDPOINT || 's3.srv1169280.hstgr.cloud';
+// MinIO's `endPoint` must be a BARE hostname — no scheme, no port, no path.
+// A full-URL secret (e.g. "https://host:443") makes `new Minio.Client()` throw
+// InvalidEndpointError at import time. Sanitize defensively.
+const ENDPOINT =
+  (process.env.MINIO_ENDPOINT || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '')
+    .replace(/:\d+$/, '')
+  || 's3.srv1169280.hstgr.cloud';
 const PORT = parseInt(process.env.MINIO_PORT || '443');
 const ACCESS_KEY = process.env.MINIO_ACCESS_KEY || 'admin';
 const SECRET_KEY = process.env.MINIO_SECRET_KEY || 'Fluidbucket@2026';

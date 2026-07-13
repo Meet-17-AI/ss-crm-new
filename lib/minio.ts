@@ -4,9 +4,22 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config({ path: '.env.local' });
 
+// MinIO's `endPoint` must be a BARE hostname — no scheme, no port, no path.
+// If the MINIO_ENDPOINT secret is set to a full URL (e.g. "https://host:443"),
+// `new Minio.Client()` throws InvalidEndpointError at import time and crashes
+// the whole backend on startup. Sanitize defensively so that can never happen.
+const MINIO_PORT_NUM = parseInt(process.env.MINIO_PORT || '443');
+const MINIO_HOST =
+  (process.env.MINIO_ENDPOINT || '')
+    .trim()
+    .replace(/^https?:\/\//i, '') // strip scheme
+    .replace(/\/.*$/, '')          // strip any path
+    .replace(/:\d+$/, '')          // strip :port
+  || 's3.srv1169280.hstgr.cloud';
+
 export const minioClient = new Minio.Client({
-  endPoint: process.env.MINIO_ENDPOINT || 's3.srv1169280.hstgr.cloud',
-  port: parseInt(process.env.MINIO_PORT || '443'),
+  endPoint: MINIO_HOST,
+  port: MINIO_PORT_NUM,
   useSSL: process.env.MINIO_USE_SSL === 'true',
   accessKey: process.env.MINIO_ACCESS_KEY || 'admin',
   secretKey: process.env.MINIO_SECRET_KEY || 'Fluidbucket@2026',
@@ -51,7 +64,7 @@ export async function uploadFile(
     );
 
     // Generate public URL
-    const url = `https://${process.env.MINIO_ENDPOINT}:${process.env.MINIO_PORT}/${bucketName}/${objectName}`;
+    const url = `https://${MINIO_HOST}:${MINIO_PORT_NUM}/${bucketName}/${objectName}`;
     
     console.log('✅ MinIO upload complete:', url);
     return url;
