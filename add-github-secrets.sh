@@ -50,8 +50,8 @@ gh secret set FRONTEND_URL --body "https://safestories-crm.vercel.app/"
 gh secret set DOMAIN_NAME --body "srv1169280.hstgr.cloud"
 
 # MinIO Storage Secrets
-gh secret set MINIO_ENDPOINT --body "s3.fluidjobs.ai"
-gh secret set MINIO_PORT --body "9002"
+gh secret set MINIO_ENDPOINT --body "s3.srv1169280.hstgr.cloud"
+gh secret set MINIO_PORT --body "443"
 gh secret set MINIO_ACCESS_KEY --body "admin"
 gh secret set MINIO_SECRET_KEY --body "Fluidbucket@2026"
 gh secret set MINIO_BUCKET_NAME --body "safestories-panel"

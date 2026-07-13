@@ -6,8 +6,8 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config({ path: '.env.local' });
 
-const ENDPOINT = process.env.MINIO_ENDPOINT || 's3.fluidjobs.ai';
-const PORT = parseInt(process.env.MINIO_PORT || '9002');
+const ENDPOINT = process.env.MINIO_ENDPOINT || 's3.srv1169280.hstgr.cloud';
+const PORT = parseInt(process.env.MINIO_PORT || '443');
 const ACCESS_KEY = process.env.MINIO_ACCESS_KEY || 'admin';
 const SECRET_KEY = process.env.MINIO_SECRET_KEY || 'Fluidbucket@2026';
 const USE_SSL = process.env.MINIO_USE_SSL !== 'false';
