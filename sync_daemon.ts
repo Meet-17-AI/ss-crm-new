@@ -1,4 +1,8 @@
-import { Client, Pool } from 'pg';
+import { Client, Pool, types } from 'pg';
+
+// Override PostgreSQL timestamp parsing to prevent Javascript Date from truncating microseconds
+types.setTypeParser(1114, str => str); // timestamp without time zone
+types.setTypeParser(1184, str => str); // timestamp with time zone
 
 const POLLING_INTERVAL_MS = 10000; // 10 seconds
 
@@ -51,10 +55,10 @@ async function getTargetSchema(tableName: string): Promise<string[]> {
 async function syncTable(config: TableConfig) {
   try {
     // 1. Get high-water mark from Target
-    let lastSyncTime: any = new Date(0);
-    const hwResult = await targetDb.query(`SELECT MAX(${config.timestampCol})::text as max_ts FROM ${config.name}`);
+    let lastSyncTime: string = '1970-01-01 00:00:00';
+    const hwResult = await targetDb.query(`SELECT MAX(${config.timestampCol}) as max_ts FROM ${config.name}`);
     if (hwResult.rows[0].max_ts) {
-      lastSyncTime = hwResult.rows[0].max_ts; // Keep as exact postgres string to prevent microsecond precision loss
+      lastSyncTime = hwResult.rows[0].max_ts;
     }
 
     // 2. Fetch updated/new rows from Source
