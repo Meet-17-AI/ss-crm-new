@@ -56,11 +56,9 @@ jobs:
             
             # MinIO
             MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }}
-            MINIO_PORT=${{ secrets.MINIO_PORT }}
             MINIO_ACCESS_KEY=${{ secrets.MINIO_ACCESS_KEY }}
             MINIO_SECRET_KEY=${{ secrets.MINIO_SECRET_KEY }}
             MINIO_BUCKET_NAME=${{ secrets.MINIO_BUCKET_NAME }}
-            MINIO_USE_SSL=${{ secrets.MINIO_USE_SSL }}
             
             # Razorpay
             RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}

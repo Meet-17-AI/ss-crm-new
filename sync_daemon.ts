@@ -61,7 +61,7 @@ async function syncTable(config: TableConfig) {
 
     // 2. Fetch updated/new rows from Source
     const sourceRows = await sourceDb.query(
-      `SELECT * FROM ${config.name} WHERE ${config.timestampCol} > $1 OR ${config.timestampCol} IS NULL ORDER BY ${config.timestampCol} ASC NULLS FIRST`,
+      `SELECT * FROM ${config.name} WHERE ${config.timestampCol} > $1 ORDER BY ${config.timestampCol} ASC NULLS FIRST`,
       [lastSyncTime]
     );
 
