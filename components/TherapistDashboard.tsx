@@ -1218,7 +1218,7 @@ export function TherapistDashboard({ onLogout, user }: TherapistDashboardProps) 
 
   const handleFillSessionNotes = async (appointment: any) => {
     setSelectedAppointmentIndex(null);
-    const link = `https://safestories-dashboard.vercel.app/session-notes/${appointment.booking_id}`;
+    const link = `https://panel.safestories.in/session-notes/${appointment.booking_id}`;
     window.open(link, '_blank');
   };
 
