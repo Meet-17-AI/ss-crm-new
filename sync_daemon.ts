@@ -51,12 +51,10 @@ async function getTargetSchema(tableName: string): Promise<string[]> {
 async function syncTable(config: TableConfig) {
   try {
     // 1. Get high-water mark from Target
-    let lastSyncTime = new Date(0);
-    const hwResult = await targetDb.query(`SELECT MAX(${config.timestampCol}) as max_ts FROM ${config.name}`);
+    let lastSyncTime: any = new Date(0);
+    const hwResult = await targetDb.query(`SELECT MAX(${config.timestampCol})::text as max_ts FROM ${config.name}`);
     if (hwResult.rows[0].max_ts) {
-      lastSyncTime = new Date(hwResult.rows[0].max_ts);
-      // Don't subtract time to avoid infinite loops on the same exact timestamp
-      // lastSyncTime = new Date(lastSyncTime.getTime() - 60000); 
+      lastSyncTime = hwResult.rows[0].max_ts; // Keep as exact postgres string to prevent microsecond precision loss
     }
 
     // 2. Fetch updated/new rows from Source
