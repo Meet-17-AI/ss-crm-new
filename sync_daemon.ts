@@ -55,8 +55,8 @@ async function syncTable(config: TableConfig) {
     const hwResult = await targetDb.query(`SELECT MAX(${config.timestampCol}) as max_ts FROM ${config.name}`);
     if (hwResult.rows[0].max_ts) {
       lastSyncTime = new Date(hwResult.rows[0].max_ts);
-      // Subtract a minute just to be safe with timezone/microsecond precision issues
-      lastSyncTime = new Date(lastSyncTime.getTime() - 60000); 
+      // Don't subtract time to avoid infinite loops on the same exact timestamp
+      // lastSyncTime = new Date(lastSyncTime.getTime() - 60000); 
     }
 
     // 2. Fetch updated/new rows from Source
