@@ -57,8 +57,8 @@ const STAGE_ORDER = [
   'followup-1',
   'booked-first-session',
   'referred',
-  'closed',
-  'dropouts'
+  'dropouts',
+  'closed'
 ]
 
 const STAGE_LABELS: Record<string, string> = {
@@ -68,7 +68,7 @@ const STAGE_LABELS: Record<string, string> = {
   'booked-first-session': 'Booked First Session',
   'referred': 'Referred',
   'closed': 'Closed',
-  'dropouts': 'Dropouts'
+  'dropouts': 'Unresponsive'
 }
 
 const defaultStages: Stage[] = STAGE_ORDER.map(id => ({
