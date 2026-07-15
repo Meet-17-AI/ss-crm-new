@@ -12,7 +12,7 @@ interface AddLeadModalProps {
 const AddLeadModal: React.FC<AddLeadModalProps> = ({ isOpen, onClose, onAdd }) => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-    const [leadManagers, setLeadManagers] = useState<{ id: number; name: string }[]>([]);
+
 
     const [isSourceOpen, setIsSourceOpen] = useState(false);
     const [isAssignedToOpen, setIsAssignedToOpen] = useState(false);
@@ -33,13 +33,7 @@ const AddLeadModal: React.FC<AddLeadModalProps> = ({ isOpen, onClose, onAdd }) =
         return () => document.removeEventListener('click', handleClickOutside);
     }, []);
 
-    useEffect(() => {
-        if (!isOpen) return;
-        fetch('/api/lead-managers')
-            .then(r => r.json())
-            .then(data => setLeadManagers(data))
-            .catch(err => console.error('Failed to fetch lead managers:', err));
-    }, [isOpen]);
+
     const [formData, setFormData] = useState({
         name: '',
         email: '',
@@ -80,7 +74,7 @@ const AddLeadModal: React.FC<AddLeadModalProps> = ({ isOpen, onClose, onAdd }) =
                     source: formData.source === 'Other (Mention)' && formData.otherSource.trim() !== '' 
                         ? formData.otherSource 
                         : formData.source,
-                    sales_agent_id: formData.assignedTo ? parseInt(formData.assignedTo) : null,
+
                     general_remarks: formData.remarks,
                     date_of_enquiry: formData.dateOfEnquiry
                 })
@@ -252,56 +246,7 @@ const AddLeadModal: React.FC<AddLeadModalProps> = ({ isOpen, onClose, onAdd }) =
                                     />
                                 )}
                             </div>
-                            <div>
-                                <label className="block text-sm font-semibold mb-2">Assigned To</label>
-                                <div className="custom-dropdown w-full" ref={assignedToRef}>
-                                    <button
-                                        type="button"
-                                        className="dropdown-trigger w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
-                                        onClick={() => setIsAssignedToOpen(!isAssignedToOpen)}
-                                    >
-                                        <span>
-                                            {leadManagers.find(m => String(m.id) === formData.assignedTo)?.name || 'Unassigned'}
-                                        </span>
-                                        <svg
-                                            className={`dropdown-arrow ${isAssignedToOpen ? 'open' : ''}`}
-                                            width="16"
-                                            height="16"
-                                            viewBox="0 0 16 16"
-                                            fill="none"
-                                        >
-                                            <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                        </svg>
-                                    </button>
-                                    {isAssignedToOpen && (
-                                        <div className="dropdown-menu w-full max-h-48 overflow-y-auto">
-                                            <div
-                                                className={`dropdown-item ${formData.assignedTo === '' ? 'selected' : ''}`}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setFormData(prev => ({ ...prev, assignedTo: '' }));
-                                                    setIsAssignedToOpen(false);
-                                                }}
-                                            >
-                                                Unassigned
-                                            </div>
-                                            {leadManagers.map(manager => (
-                                                <div
-                                                    key={manager.id}
-                                                    className={`dropdown-item ${formData.assignedTo === String(manager.id) ? 'selected' : ''}`}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setFormData(prev => ({ ...prev, assignedTo: String(manager.id) }));
-                                                        setIsAssignedToOpen(false);
-                                                    }}
-                                                >
-                                                    {manager.name}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
+
                         </div>
 
                         <div>

@@ -226,11 +226,7 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
 
     const canActOnLead = (leadData: Lead | null): boolean => {
         if (!currentUser || !leadData) return false
-        const userId = String(currentUser.id)
-        // Can act if you are the assigned manager OR if it's currently unassigned
-        if (leadData.sales_agent_id && String(leadData.sales_agent_id) === userId) return true
-        if (!leadData.sales_agent_id || String(leadData.sales_agent_id) === 'null') return true
-        return false
+        return true
     }
 
     const canAct = canActOnLead(lead)
@@ -710,39 +706,7 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
                                 <span className="lp-detail-value" style={{ textTransform: 'capitalize' }}>{lead.source || 'N/A'}</span>
                             )}
                         </div>
-                        <div className="lp-detail-item">
-                            <span className="lp-detail-label">Lead Manager</span>
-                            {isEditing ? (
-                                <div className="custom-dropdown w-full" ref={managerRef}>
-                                    <button
-                                        type="button"
-                                        className="dropdown-trigger w-full"
-                                        onClick={() => setIsManagerOpen(!isManagerOpen)}
-                                    >
-                                        <span>{leadManagers.find(m => m.id === editForm.sales_agent_id)?.name || 'Unassigned'}</span>
-                                        <svg className={`dropdown-arrow ${isManagerOpen ? 'open' : ''}`} width="16" height="16" viewBox="0 0 16 16" fill="none">
-                                            <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                                        </svg>
-                                    </button>
-                                    {isManagerOpen && (
-                                        <div className="dropdown-menu w-full">
-                                            <div className="dropdown-item" onClick={() => { setEditForm({ ...editForm, sales_agent_id: null }); setIsManagerOpen(false); }}>Unassigned</div>
-                                            {leadManagers.map(m => (
-                                                <div
-                                                    key={m.id}
-                                                    className={`dropdown-item ${editForm.sales_agent_id === m.id ? 'selected' : ''}`}
-                                                    onClick={() => { setEditForm({ ...editForm, sales_agent_id: m.id }); setIsManagerOpen(false); }}
-                                                >
-                                                    {m.name}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                <span className="lp-detail-value">{lead.sales_agent_name || 'Unassigned'}</span>
-                            )}
-                        </div>
+
                         <div className="lp-detail-item">
                             <span className="lp-detail-label">Assigned Therapist</span>
                             {isEditing ? (
@@ -940,22 +904,7 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
                     </div>
                 </div>
 
-                <div className="lp-section">
-                    <h3 className="lp-section-title">Lead Manager Remarks:</h3>
-                    {isEditing ? (
-                        <textarea
-                            className="lp-edit-textarea"
-                            rows={4}
-                            value={editForm.remark_lead_manager || ''}
-                            onChange={(e) => setEditForm({ ...editForm, remark_lead_manager: e.target.value })}
-                            placeholder="Enter Lead Manager remarks..."
-                        />
-                    ) : (
-                        <div className={`lp-card-box ${!lead.remark_lead_manager ? 'lp-empty-text' : ''}`}>
-                            {lead.remark_lead_manager || 'No lead manager remarks available'}
-                        </div>
-                    )}
-                </div>
+
             </div>
 
             <div className="lead-profile-right">

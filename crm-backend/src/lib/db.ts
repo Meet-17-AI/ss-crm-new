@@ -1,12 +1,13 @@
 import { Pool } from 'pg';
 import * as dotenv from 'dotenv';
 
-dotenv.config({ path: '.env.local' });
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env.local') });
 
 const pool = new Pool({
   host: process.env.PGHOST || '72.60.103.151',
   port: parseInt(process.env.PGPORT || '5432'),
-  database: process.env.PGDATABASE || 'safestories_db',
+  database: process.env.PGDATABASE || 'safestories_db_v2',
   user: process.env.PGUSER || 'fluidadmin',
   password: process.env.PGPASSWORD || 'admin123',
   max: 1, // Limit connections for serverless

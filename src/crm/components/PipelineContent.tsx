@@ -78,7 +78,7 @@ const defaultStages: Stage[] = STAGE_ORDER.map(id => ({
 }))
 
 const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) => {
-  const [leadManagers, setLeadManagers] = useState<{ id: number; name: string }[]>([])
+
   const [stages, setStages] = useState<Stage[]>(defaultStages)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
@@ -202,13 +202,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
     return () => document.removeEventListener('click', handleClickOutside)
   }, [])
 
-  // Fetch lead managers for dropdown
-  useEffect(() => {
-    fetch('/api/lead-managers')
-      .then(r => r.json())
-      .then(data => setLeadManagers(data))
-      .catch(err => console.error('Failed to fetch lead managers:', err))
-  }, [])
+
 
   // Fetch leads from DB
   useEffect(() => {
@@ -293,11 +287,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
 
   const canActOnLead = (lead: Lead): boolean => {
     if (!currentUser) return false
-    const userId = String(currentUser.id)
-    // Can act if you are the assigned manager OR if it's currently unassigned
-    if (lead.sales_agent_id && String(lead.sales_agent_id) === userId) return true
-    if (!lead.sales_agent_id || lead.sales_agent_id === 'null') return true
-    return false
+    return true
   }
 
   const isForwardMove = (fromId: string, toId: string): boolean => {
@@ -507,41 +497,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
     setPendingDrop(null)
   }
 
-  const handleSalesAssignment = async (leadId: string, stageId: string, sales_agent_id: number | null, sales_agent_name: string) => {
-    try {
-      const res = await fetch(`/api/leads/${leadId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sales_agent_id })
-      })
 
-      if (res.ok) {
-        setStages(prev =>
-          prev.map(stage => {
-            if (stage.id !== stageId) return stage
-            return {
-              ...stage,
-              leads: stage.leads.map(lead =>
-                lead.id === leadId ? {
-                  ...lead,
-                  sales_agent_id: sales_agent_id ? String(sales_agent_id) : null,
-                  assignedToSales: sales_agent_name
-                } : lead
-              ),
-            }
-          })
-        )
-        setToast({ message: 'Lead manager updated successfully', type: 'success' })
-      } else {
-        setToast({ message: 'Failed to update lead manager', type: 'error' })
-      }
-    } catch (error) {
-      console.error('Error updating lead manager:', error)
-      setToast({ message: 'Error updating lead manager', type: 'error' })
-    } finally {
-      setEditingSalesAssignment(null)
-    }
-  }
 
   const isPostPreTherapy = (stageId: string): boolean =>
     ['booked-first-session'].includes(stageId)

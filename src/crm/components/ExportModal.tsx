@@ -119,7 +119,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
       // Leads Data
       const leadsHeaders = [];
       if (isAllTime) leadsHeaders.push('Month');
-      leadsHeaders.push('Lead Name', 'Phone', 'Email', 'Source', 'Lead Manager', 'Assigned Therapist', 'Stage', 'Aging', 'Lead Created At');
+      leadsHeaders.push('Lead Name', 'Phone', 'Email', 'Source', 'Assigned Therapist', 'Stage', 'Aging', 'Lead Created At');
 
       const leadsExportRows = filteredLeads.map((d: any) => {
         let displayDate = d.created_at;
@@ -142,7 +142,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({ isOpen, onClose }) => 
           d.phone,
           d.email || '',
           d.source,
-          d.sales_agent_name || d.sales_agent_id || 'Unassigned',
           d.therapist_name || d.therapist_id || 'Unassigned',
           STAGE_LABEL[d.pipeline_stage || 'lead-inquire'] || (d.pipeline_stage || 'lead-inquire'),
           calculateAging(displayDate),

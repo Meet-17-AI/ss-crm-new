@@ -14,7 +14,7 @@ interface Lead {
   phone: string
   email: string
   source: string
-  leadManager: string
+
   assignedTherapist: string
   status: string
   stage: string
@@ -97,7 +97,7 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
             phone: d.phone,
             email: d.email || '',
             source: d.source,
-            leadManager: d.sales_agent_name || d.sales_agent_id || 'Unassigned',
+
             assignedTherapist: d.therapist_name || d.therapist_id || 'Unassigned',
             status: d.status,
             stage: d.pipeline_stage || 'lead-inquire',
@@ -367,7 +367,7 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
               <th>Lead Name</th>
               <th>Contact Info</th>
               <th>Source</th>
-              <th>Lead Manager</th>
+
               <th>Stage</th>
               <th>Aging</th>
             </tr>
@@ -407,7 +407,7 @@ const LeadsContent = ({ setCurrentPage }: LeadsContentProps) => {
                     <div className="contact-email">{lead.email}</div>
                   </td>
                   <td>{lead.source}</td>
-                  <td>{lead.leadManager}</td>
+
                   <td>
                     <span className="stage-pill">
                       {STAGE_LABEL[lead.stage] || lead.stage}
