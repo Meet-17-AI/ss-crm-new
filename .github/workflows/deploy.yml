@@ -8,223 +8,253 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      # Shared deploy script, used by the first attempt and the retry step.
-      DEPLOY_SCRIPT: |
-            # Navigate to CRM directory (create if it doesn't exist)
-            mkdir -p /opt/ss-crm
-            cd /opt/ss-crm
-
-            # If git repo is not initialized, clone using PAT token
-            if [ ! -d ".git" ]; then
-              git init
-              git remote add origin https://${{ secrets.GH_PAT }}@github.com/safestories-tech/safestories-crm.git
-            else
-              # Update remote URL with fresh token on every deploy
-              git remote set-url origin https://${{ secrets.GH_PAT }}@github.com/safestories-tech/safestories-crm.git
-            fi
-
-            # Save current state so we can roll back if the new deploy fails
-            PREV_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
-            docker tag ss-crm-crm-backend:latest ss-crm-crm-backend:previous 2>/dev/null || true
-
-            # Pull latest changes
-            git fetch --all
-            git reset --hard origin/main
-            
-            # Create .env.production file from GitHub Secrets
-            cat > .env.production << 'EOF'
-            NODE_ENV=production
-            PORT=3002
-            
-            # Database
-            PGHOST=${{ secrets.PGHOST }}
-            PGPORT=${{ secrets.PGPORT }}
-            PGDATABASE=${{ secrets.PGDATABASE }}
-            PGUSER=${{ secrets.PGUSER }}
-            PGPASSWORD=${{ secrets.PGPASSWORD }}
-            
-            DB_HOST=${{ secrets.DB_HOST }}
-            DB_PORT=${{ secrets.DB_PORT }}
-            DB_NAME=${{ secrets.DB_NAME }}
-            DB_USER=${{ secrets.DB_USER }}
-            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-            
-            # Frontend & Domain
-            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
-            DOMAIN_NAME=${{ secrets.DOMAIN_NAME || secrets.VPS_HOST }}
-            
-            # MinIO
-            MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }}
-            MINIO_PORT=${{ secrets.MINIO_PORT }}
-            MINIO_ACCESS_KEY=${{ secrets.MINIO_ACCESS_KEY }}
-            MINIO_SECRET_KEY=${{ secrets.MINIO_SECRET_KEY }}
-            MINIO_BUCKET_NAME=${{ secrets.MINIO_BUCKET_NAME }}
-            MINIO_USE_SSL=${{ secrets.MINIO_USE_SSL }}
-            
-            # Razorpay
-            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
-            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
-            
-            # Gmail
-            GMAIL_USER=${{ secrets.GMAIL_USER }}
-            GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}
-            
-            # Webhooks
-            N8N_WEBHOOK_FETCH_SLOTS_PUBLIC=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_PUBLIC }}
-            N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT }}
-            N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT }}
-            N8N_WEBHOOK_CREATE_BOOKING_PUBLIC=${{ secrets.N8N_WEBHOOK_CREATE_BOOKING_PUBLIC }}
-            N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT=${{ secrets.N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT }}
-            N8N_WEBHOOK_CANCEL_BOOKING=${{ secrets.N8N_WEBHOOK_CANCEL_BOOKING }}
-            N8N_WEBHOOK_RESCHEDULE_BOOKING=${{ secrets.N8N_WEBHOOK_RESCHEDULE_BOOKING }}
-            N8N_WEBHOOK_ISSUE_REPORT=${{ secrets.N8N_WEBHOOK_ISSUE_REPORT }}
-            N8N_WEBHOOK_SOS_EMAIL=${{ secrets.N8N_WEBHOOK_SOS_EMAIL }}
-            EOF
-
-            # CRITICAL: docker compose interpolates ${DOMAIN_NAME} etc. in labels
-            # from .env (or shell env), NOT from env_file (.env.production).
-            # Without this, Traefik router rules become Host(`crm.backend.`)
-            # and every request 404s.
-            cp .env.production .env
-
-            # ══════════════════════════════════════════════════════════════
-            # STAGE 1: PRE-FLIGHT VALIDATION
-            # Any failure here ABORTS the deploy with the running container
-            # completely untouched — production keeps serving traffic.
-            # ══════════════════════════════════════════════════════════════
-
-            DN=$(grep '^DOMAIN_NAME=' .env | cut -d= -f2)
-            if [ -z "$DN" ]; then
-              echo "❌ ABORT: DOMAIN_NAME is empty — Traefik rules would break. Running container untouched."
-              exit 1
-            fi
-            echo "✓ DOMAIN_NAME present"
-
-            if ! docker compose config -q; then
-              echo "❌ ABORT: docker-compose config invalid. Running container untouched."
-              exit 1
-            fi
-            echo "✓ compose config valid"
-
-            # Ensure the docker volume exists
-            docker volume inspect crm_backend_data >/dev/null 2>&1 || docker volume create crm_backend_data
-
-            # Build the NEW image first — old container keeps running during build
-            echo "🚀 Building crm-backend..."
-            if ! docker compose build crm-backend; then
-              echo "❌ ABORT: build failed. Running container untouched."
-              exit 1
-            fi
-            echo "✓ build succeeded"
-
-            # ══════════════════════════════════════════════════════════════
-            # Rollback helper: restore previous image + previous code and
-            # restart it, so production comes back on the last good version.
-            # ══════════════════════════════════════════════════════════════
-            rollback() {
-              echo "⏪ ROLLING BACK to previous working version..."
-              if docker image inspect ss-crm-crm-backend:previous >/dev/null 2>&1; then
-                docker tag ss-crm-crm-backend:previous ss-crm-crm-backend:latest
-                if [ -n "$PREV_COMMIT" ]; then git reset --hard "$PREV_COMMIT" || true; fi
-                docker compose up -d --no-build crm-backend
-                sleep 20
-                RB_STATUS=$(docker inspect --format='{{.State.Health.Status}}' ss-crm-backend 2>/dev/null || echo unknown)
-                echo "⏪ Rollback complete — container status: $RB_STATUS"
-              else
-                echo "⚠️ No previous image found; restarting whatever is available..."
-                docker compose up -d --no-build crm-backend || true
-              fi
-            }
-
-            # ══════════════════════════════════════════════════════════════
-            # STAGE 2: SWAP to the new version
-            # ══════════════════════════════════════════════════════════════
-            echo "🔄 Swapping to new container..."
-            if ! docker compose up -d crm-backend; then
-              echo "🚨 Swap failed!"
-              rollback
-              exit 1
-            fi
-
-            # ══════════════════════════════════════════════════════════════
-            # STAGE 3: VERIFY — container health, then the PUBLIC URL through
-            # Traefik (catches routing/label breakage that container health
-            # cannot see). Any failure triggers automatic rollback.
-            # ══════════════════════════════════════════════════════════════
-            echo "⏳ Waiting for container to become healthy..."
-            HEALTHY=0
-            for i in $(seq 1 12); do
-              sleep 5
-              STATUS=$(docker inspect --format='{{.State.Health.Status}}' ss-crm-backend 2>/dev/null || echo "not_found")
-              echo "  Health check attempt $i/12: $STATUS"
-              if [ "$STATUS" = "healthy" ]; then HEALTHY=1; break; fi
-              if [ "$STATUS" = "unhealthy" ]; then break; fi
-            done
-
-            if [ "$HEALTHY" != "1" ]; then
-              echo "🚨 New container failed health check! Logs:"
-              docker compose logs --tail=50 crm-backend || true
-              rollback
-              exit 1
-            fi
-            echo "✓ container healthy"
-
-            echo "⏳ Verifying public URLs through Traefik..."
-            EXT_OK=0
-            for i in $(seq 1 6); do
-              sleep 5
-              C1=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/leads" || echo 000)
-              C2=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/crm/todo" || echo 000)
-              C3=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/socket.io/?EIO=4&transport=polling" || echo 000)
-              echo "  Public check $i/6: /api/leads=$C1 /api/crm/todo=$C2 /socket.io=$C3"
-              if [ "$C1" = "200" ] && [ "$C2" = "200" ] && [ "$C3" = "200" ]; then EXT_OK=1; break; fi
-            done
-
-            if [ "$EXT_OK" != "1" ]; then
-              echo "🚨 Public URL verification FAILED — Traefik routing is broken for the new deploy."
-              echo "Container Traefik rules:"
-              docker inspect ss-crm-backend --format '{{json .Config.Labels}}' | tr ',' '\n' | grep -i 'rule' | head -6 || true
-              rollback
-              exit 1
-            fi
-
-            echo "✅ Deployment verified end-to-end: container healthy + all public URLs responding."
-            docker compose ps
-            exit 0
-
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Deploy to VPS via SSH
-        id: deploy_attempt_1
-        continue-on-error: true
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          timeout: 60s
-          script: ${{ env.DEPLOY_SCRIPT }}
-
-      # SSH from GitHub runners to the VPS occasionally fails with
-      # "dial tcp: i/o timeout" (transient network / fail2ban). The deploy
-      # script is rollback-safe, so retrying the whole thing is safe.
-      - name: Wait before retry
-        if: steps.deploy_attempt_1.outcome == 'failure'
+      # The runner already has the exact commit that triggered this workflow, so
+      # it ships that source to the VPS itself. The VPS used to `git fetch` the
+      # repo with a PAT; when that token expired the fetch failed silently and
+      # every deploy rebuilt stale code while reporting success.
+      - name: Stamp commit and generate .env.production
         run: |
-          echo "First SSH attempt failed — waiting 60s before retry..."
-          sleep 60
+          echo "${{ github.sha }}" > DEPLOYED_COMMIT
 
-      - name: Deploy to VPS via SSH (retry)
-        if: steps.deploy_attempt_1.outcome == 'failure'
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          timeout: 60s
-          script: ${{ env.DEPLOY_SCRIPT }}
+          cat > .env.production << 'ENV_EOF'
+          NODE_ENV=production
+          PORT=3002
+
+          # Database
+          PGHOST=${{ secrets.PGHOST }}
+          PGPORT=${{ secrets.PGPORT }}
+          PGDATABASE=${{ secrets.PGDATABASE }}
+          PGUSER=${{ secrets.PGUSER }}
+          PGPASSWORD=${{ secrets.PGPASSWORD }}
+
+          DB_HOST=${{ secrets.DB_HOST }}
+          DB_PORT=${{ secrets.DB_PORT }}
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+
+          # Frontend & Domain
+          FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+          DOMAIN_NAME=${{ secrets.DOMAIN_NAME || secrets.VPS_HOST }}
+
+          # MinIO
+          MINIO_ENDPOINT=${{ secrets.MINIO_ENDPOINT }}
+          MINIO_PORT=${{ secrets.MINIO_PORT }}
+          MINIO_ACCESS_KEY=${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY=${{ secrets.MINIO_SECRET_KEY }}
+          MINIO_BUCKET_NAME=${{ secrets.MINIO_BUCKET_NAME }}
+          MINIO_USE_SSL=${{ secrets.MINIO_USE_SSL }}
+
+          # Razorpay
+          RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
+          RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
+
+          # Gmail
+          GMAIL_USER=${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}
+
+          # Webhooks
+          N8N_WEBHOOK_FETCH_SLOTS_PUBLIC=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_PUBLIC }}
+          N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT }}
+          N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT=${{ secrets.N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT }}
+          N8N_WEBHOOK_CREATE_BOOKING_PUBLIC=${{ secrets.N8N_WEBHOOK_CREATE_BOOKING_PUBLIC }}
+          N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT=${{ secrets.N8N_WEBHOOK_CREATE_BOOKING_ADMIN_DIRECT }}
+          N8N_WEBHOOK_CANCEL_BOOKING=${{ secrets.N8N_WEBHOOK_CANCEL_BOOKING }}
+          N8N_WEBHOOK_RESCHEDULE_BOOKING=${{ secrets.N8N_WEBHOOK_RESCHEDULE_BOOKING }}
+          N8N_WEBHOOK_ISSUE_REPORT=${{ secrets.N8N_WEBHOOK_ISSUE_REPORT }}
+          N8N_WEBHOOK_SOS_EMAIL=${{ secrets.N8N_WEBHOOK_SOS_EMAIL }}
+          ENV_EOF
+
+          if ! grep -q '^DOMAIN_NAME=..*' .env.production; then
+            echo "❌ ABORT: DOMAIN_NAME secret is empty — Traefik router rules would break."
+            exit 1
+          fi
+          echo "✓ .env.production generated, commit stamped as ${{ github.sha }}"
+
+      - name: Write the remote deploy script
+        run: |
+          cat > deploy_remote.sh << 'REMOTE_EOF'
+          #!/usr/bin/env bash
+          # Runs ON THE VPS. Builds from the freshly uploaded source, and only
+          # swaps it into place once the build succeeds, so a failure leaves the
+          # running container completely untouched.
+          set -uo pipefail
+
+          EXPECTED_SHA="$1"
+          LIVE=/opt/ss-crm
+          STAGING=/opt/ss-crm-staging
+          PREV=/opt/ss-crm-prev
+
+          # ═══ STAGE 1: PRE-FLIGHT — running container untouched throughout ═══
+
+          if [ ! -f "$STAGING/DEPLOYED_COMMIT" ]; then
+            echo "❌ ABORT: uploaded source is missing DEPLOYED_COMMIT."
+            exit 1
+          fi
+
+          ACTUAL_SHA=$(cat "$STAGING/DEPLOYED_COMMIT")
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "❌ ABORT: source on server is $ACTUAL_SHA but this run expects $EXPECTED_SHA."
+            exit 1
+          fi
+          echo "✓ source verified as commit $ACTUAL_SHA"
+
+          cd "$STAGING" || exit 1
+          # docker compose interpolates ${DOMAIN_NAME} in the Traefik labels from
+          # .env, NOT from env_file. Without this every request 404s.
+          cp .env.production .env
+
+          DN=$(grep '^DOMAIN_NAME=' .env | cut -d= -f2)
+          if [ -z "$DN" ]; then
+            echo "❌ ABORT: DOMAIN_NAME is empty — Traefik rules would break."
+            exit 1
+          fi
+          echo "✓ DOMAIN_NAME present"
+
+          if ! docker compose -p ss-crm config -q; then
+            echo "❌ ABORT: docker-compose config invalid."
+            exit 1
+          fi
+          echo "✓ compose config valid"
+
+          docker volume inspect crm_backend_data >/dev/null 2>&1 || docker volume create crm_backend_data
+
+          # Keep the current image so we can roll back to it.
+          docker tag ss-crm-crm-backend:latest ss-crm-crm-backend:previous 2>/dev/null || true
+
+          echo "🚀 Building crm-backend from $ACTUAL_SHA..."
+          if ! docker compose -p ss-crm build crm-backend; then
+            echo "❌ ABORT: build failed. Running container untouched."
+            exit 1
+          fi
+          echo "✓ build succeeded"
+
+          # ═══ STAGE 2: SWAP source into place, then swap the container ═══
+
+          rm -rf "$PREV"
+          [ -d "$LIVE" ] && cp -a "$LIVE" "$PREV"
+          rm -rf "$LIVE"
+          mv "$STAGING" "$LIVE"
+          cd "$LIVE" || exit 1
+
+          rollback() {
+            echo "⏪ ROLLING BACK to previous working version..."
+            if docker image inspect ss-crm-crm-backend:previous >/dev/null 2>&1; then
+              docker tag ss-crm-crm-backend:previous ss-crm-crm-backend:latest
+            else
+              echo "⚠️ No previous image found."
+            fi
+            if [ -d "$PREV" ]; then
+              rm -rf "$LIVE"
+              cp -a "$PREV" "$LIVE"
+            fi
+            cd "$LIVE" 2>/dev/null || return
+            docker compose -p ss-crm up -d --no-build crm-backend || true
+            sleep 20
+            RB=$(docker inspect --format='{{.State.Health.Status}}' ss-crm-backend 2>/dev/null || echo unknown)
+            echo "⏪ Rollback complete — container status: $RB"
+          }
+
+          echo "🔄 Swapping to new container..."
+          if ! docker compose -p ss-crm up -d crm-backend; then
+            echo "🚨 Swap failed!"
+            rollback
+            exit 1
+          fi
+
+          # ═══ STAGE 3: VERIFY container health, then the public URLs ═══
+
+          echo "⏳ Waiting for container to become healthy..."
+          HEALTHY=0
+          for i in $(seq 1 12); do
+            sleep 5
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' ss-crm-backend 2>/dev/null || echo "not_found")
+            echo "  Health check attempt $i/12: $STATUS"
+            if [ "$STATUS" = "healthy" ]; then HEALTHY=1; break; fi
+            if [ "$STATUS" = "unhealthy" ]; then break; fi
+          done
+
+          if [ "$HEALTHY" != "1" ]; then
+            echo "🚨 New container failed health check! Logs:"
+            docker compose -p ss-crm logs --tail=50 crm-backend || true
+            rollback
+            exit 1
+          fi
+          echo "✓ container healthy"
+
+          echo "⏳ Verifying public URLs through Traefik..."
+          EXT_OK=0
+          for i in $(seq 1 6); do
+            sleep 5
+            C1=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/leads" || echo 000)
+            C2=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/crm/todo" || echo 000)
+            C3=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/socket.io/?EIO=4&transport=polling" || echo 000)
+            echo "  Public check $i/6: /api/leads=$C1 /api/crm/todo=$C2 /socket.io=$C3"
+            if [ "$C1" = "200" ] && [ "$C2" = "200" ] && [ "$C3" = "200" ]; then EXT_OK=1; break; fi
+          done
+
+          if [ "$EXT_OK" != "1" ]; then
+            echo "🚨 Public URL verification FAILED — Traefik routing is broken."
+            docker inspect ss-crm-backend --format '{{json .Config.Labels}}' | tr ',' '\n' | grep -i 'rule' | head -6 || true
+            rollback
+            exit 1
+          fi
+
+          echo "✅ Deployment verified end-to-end: commit $ACTUAL_SHA live, container healthy, public URLs responding."
+          docker compose -p ss-crm ps
+          exit 0
+          REMOTE_EOF
+          chmod +x deploy_remote.sh
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Upload source and deploy
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -p $VPS_PORT \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=20"
+          TARGET="$VPS_USER@$VPS_HOST"
+
+          # The remote script is rollback-safe, so retrying the whole thing is
+          # safe. SSH from GitHub runners intermittently fails with
+          # "dial tcp: i/o timeout" (transient network / fail2ban).
+          attempt() {
+            echo "📦 Uploading source ($EXPECTED_SHA) to $VPS_HOST..."
+            tar czf - \
+              --exclude=./.git \
+              --exclude=./node_modules \
+              --exclude=./crm-backend/node_modules \
+              --exclude=./dist \
+              . | ssh $SSH_OPTS "$TARGET" \
+                'set -e
+                 rm -rf /opt/ss-crm-staging
+                 mkdir -p /opt/ss-crm-staging
+                 tar xzf - -C /opt/ss-crm-staging
+                 cp /opt/ss-crm-staging/deploy_remote.sh /tmp/ss-crm-deploy.sh
+                 chmod +x /tmp/ss-crm-deploy.sh
+                 echo "✓ source extracted on VPS"' || return 1
+
+            echo "🚀 Running remote deploy..."
+            ssh $SSH_OPTS "$TARGET" "bash /tmp/ss-crm-deploy.sh '$EXPECTED_SHA'" || return 1
+          }
+
+          if attempt; then exit 0; fi
+
+          echo "First attempt failed — waiting 60s before retry..."
+          sleep 60
+          attempt
