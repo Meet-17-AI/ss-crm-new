@@ -85,9 +85,13 @@ jobs:
           set -uo pipefail
 
           EXPECTED_SHA="$1"
+          # The deploy user is not root: it can write inside /opt/ss-crm but
+          # cannot create siblings in /opt. So staging and the rollback snapshot
+          # live under $HOME, and the live tree is updated in place rather than
+          # being moved or replaced.
           LIVE=/opt/ss-crm
-          STAGING=/opt/ss-crm-staging
-          PREV=/opt/ss-crm-prev
+          STAGING="$HOME/.ss-crm-deploy/staging"
+          PREV="$HOME/.ss-crm-deploy/prev"
 
           # ═══ STAGE 1: PRE-FLIGHT — running container untouched throughout ═══
 
@@ -133,12 +137,19 @@ jobs:
           fi
           echo "✓ build succeeded"
 
-          # ═══ STAGE 2: SWAP source into place, then swap the container ═══
+          # ═══ STAGE 2: SYNC source into place, then swap the container ═══
 
           rm -rf "$PREV"
-          [ -d "$LIVE" ] && cp -a "$LIVE" "$PREV"
-          rm -rf "$LIVE"
-          mv "$STAGING" "$LIVE"
+          mkdir -p "$PREV"
+          if [ -d "$LIVE" ]; then
+            cp -a "$LIVE/." "$PREV/" || { echo "❌ ABORT: could not snapshot current source."; exit 1; }
+          fi
+
+          if ! cp -a "$STAGING/." "$LIVE/"; then
+            echo "🚨 Could not write new source into $LIVE — restoring snapshot."
+            cp -a "$PREV/." "$LIVE/" || true
+            exit 1
+          fi
           cd "$LIVE" || exit 1
 
           rollback() {
@@ -149,8 +160,7 @@ jobs:
               echo "⚠️ No previous image found."
             fi
             if [ -d "$PREV" ]; then
-              rm -rf "$LIVE"
-              cp -a "$PREV" "$LIVE"
+              cp -a "$PREV/." "$LIVE/" || true
             fi
             cd "$LIVE" 2>/dev/null || return
             docker compose -p ss-crm up -d --no-build crm-backend || true
@@ -242,10 +252,11 @@ jobs:
               --exclude=./dist \
               . | ssh $SSH_OPTS "$TARGET" \
                 'set -e
-                 rm -rf /opt/ss-crm-staging
-                 mkdir -p /opt/ss-crm-staging
-                 tar xzf - -C /opt/ss-crm-staging
-                 cp /opt/ss-crm-staging/deploy_remote.sh /tmp/ss-crm-deploy.sh
+                 STAGING="$HOME/.ss-crm-deploy/staging"
+                 rm -rf "$STAGING"
+                 mkdir -p "$STAGING"
+                 tar xzf - -C "$STAGING"
+                 cp "$STAGING/deploy_remote.sh" /tmp/ss-crm-deploy.sh
                  chmod +x /tmp/ss-crm-deploy.sh
                  echo "✓ source extracted on VPS"' || return 1
 
