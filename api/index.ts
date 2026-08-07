@@ -8,6 +8,7 @@ import { convertToIST, formatISOToIST } from './_lib/timezone.js';
 import { startDashboardApiBookingSync } from './_lib/dashboardApiBookingSync.js';
 import { uploadFile } from './_lib/minio.js';
 import { sendOTPEmail, sendPasswordResetOTP } from './_lib/email.js';
+import { hashPassword, verifyPassword, needsRehash, upgradeLegacyPassword } from './_lib/password.js';
 import phase1Router, { initializePhase1Jobs } from './phase1-routes.js';
 import phase2Router from './phase2-routes.js';
 import aisensyWebhookRouter from './aisensy-webhook.js';
@@ -76,31 +77,33 @@ app.use('/api/webhooks', aisensyWebhookRouter);
 // Login endpoint
 app.post('/api/login', async (req, res) => {
   try {
-    const { username, password, portal } = req.body;
+    const { username, password } = req.body;
 
     const result = await pool.query(
-      'SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND password = $2',
-      [username, password]
+      'SELECT * FROM users WHERE LOWER(username) = LOWER($1)',
+      [username]
     );
 
-    if (result.rows.length > 0) {
-      const user = result.rows[0];
+    const candidate = result.rows[0];
+
+    if (candidate && await verifyPassword(password, candidate.password)) {
+      const user = candidate;
 
       // Check if user account is active
       if (user.is_active === false) {
-        return res.status(403).json({ 
-          success: false, 
-          message: 'Your account has been disabled. Please contact support.' 
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been disabled. Please contact support.'
         });
       }
 
-      // Portal-based role guard
-      if (portal === 'crm' && user.role !== 'sales') {
-        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+      if (needsRehash(user.password)) {
+        await upgradeLegacyPassword(pool, user.id, password);
       }
-      if (portal !== 'crm' && user.role === 'sales') {
-        return res.status(401).json({ success: false, message: 'Invalid credentials' });
-      }
+
+      // Never send the stored password hash back to the client — the frontend
+      // persists this whole object in localStorage.
+      delete user.password;
 
       // For therapists, check their approval status and fetch schedule_id
       if (user.role === 'therapist' && user.therapist_id) {
@@ -172,11 +175,11 @@ app.post('/api/verify-password', async (req, res) => {
     const { username, password } = req.body;
 
     const result = await pool.query(
-      'SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND password = $2',
-      [username, password]
+      'SELECT password FROM users WHERE LOWER(username) = LOWER($1)',
+      [username]
     );
 
-    if (result.rows.length > 0) {
+    if (result.rows.length > 0 && await verifyPassword(password, result.rows[0].password)) {
       res.json({ success: true });
     } else {
       res.json({ success: false });
@@ -202,7 +205,7 @@ app.post('/api/change-password', async (req, res) => {
 
     const result = await pool.query(
       'UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2 RETURNING id, username',
-      [newPassword, userId]
+      [await hashPassword(newPassword), userId]
     );
 
     if (result.rows.length > 0) {
@@ -351,12 +354,14 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
     const specializationDetailsJson = specializationDetails ? JSON.stringify(specializationDetails) : '[]';
     console.log('📦 Serialized specialization details:', specializationDetailsJson);
 
+    const passwordHash = await hashPassword(password);
+
     // Insert into therapist_details table
     console.log('💾 Inserting into therapist_details table...');
     console.log('Values:', {
       requestId, name, email, phone, specializations,
       specializationDetailsJson, qualification,
-      qualificationPdfUrl, profilePictureUrl, password
+      qualificationPdfUrl, profilePictureUrl
     });
     
     const detailsResult = await pool.query(
@@ -370,7 +375,7 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
       [
         requestId, name, email, phone, specializations,
         specializationDetailsJson, qualification || null,
-        qualificationPdfUrl || null, profilePictureUrl || null, password
+        qualificationPdfUrl || null, profilePictureUrl || null, passwordHash
       ]
     );
 
@@ -438,7 +443,7 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
         await pool.query(
           `INSERT INTO users (username, password, name, email, role, full_name, phone, profile_picture_url, therapist_id, created_at)
            VALUES ($1, $2, $3, $4, 'therapist', $5, $6, $7, $8, NOW())`,
-          [email, password, name, email, name, phone, profilePictureUrl, therapistId]
+          [email, passwordHash, name, email, name, phone, profilePictureUrl, therapistId]
         );
         console.log('✅ User account created for:', email, 'with therapist_id:', therapistId);
       } else {
@@ -446,7 +451,7 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
         await pool.query(
           `UPDATE users SET password = $1, name = $2, full_name = $3, phone = $4, profile_picture_url = $5, therapist_id = $6
            WHERE LOWER(email) = LOWER($7)`,
-          [password, name, name, phone, profilePictureUrl, therapistId, email]
+          [passwordHash, name, name, phone, profilePictureUrl, therapistId, email]
         );
         console.log('✅ User account updated for:', email, 'with therapist_id:', therapistId);
       }
@@ -1866,7 +1871,7 @@ app.post('/api/update-password', async (req, res) => {
 
     const result = await pool.query(
       `UPDATE users SET password = $1 WHERE id = $2 RETURNING id`,
-      [new_password, user_id]
+      [await hashPassword(new_password), user_id]
     );
 
     if (result.rows.length === 0) {
@@ -2070,7 +2075,7 @@ app.post('/api/forgot-password/reset', async (req, res) => {
     // Update password
     const updateResult = await pool.query(
       `UPDATE users SET password = $1 WHERE id = $2 RETURNING id, username`,
-      [newPassword, resetRecord.user_id]
+      [await hashPassword(newPassword), resetRecord.user_id]
     );
 
     if (updateResult.rows.length === 0) {

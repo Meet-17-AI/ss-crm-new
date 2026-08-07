@@ -19,6 +19,7 @@ global.fetch = (async (url, options) => {
 import multer from 'multer';
 import { randomUUID } from 'crypto';
 import pool from './lib/db';
+import { hashPassword, verifyPassword, needsRehash, upgradeLegacyPassword } from './lib/password';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { convertToIST } from './lib/timezone';
@@ -81,51 +82,31 @@ app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
 
     const result = await pool.query(
-      'SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND password = $2',
-      [username, password]
+      'SELECT * FROM users WHERE LOWER(username) = LOWER($1)',
+      [username]
     );
 
-    if (result.rows.length > 0) {
-      const user = result.rows[0];
+    const candidate = result.rows[0];
+
+    if (candidate && await verifyPassword(password, candidate.password)) {
+      const user = candidate;
 
       // Check if user account is active
       if (user.is_active === false) {
-        return res.status(403).json({ 
-          success: false, 
-          message: 'Your account has been disabled. Please contact support.' 
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been disabled. Please contact support.'
         });
       }
 
-      // Role-based access control based on request origin
-      const origin = req.headers.origin || req.headers.referer || '';
-      const isCRM = origin.includes('crm.safestories.in') || origin.includes('localhost:5173');
-      const isDashboard = origin.includes('panel.safestories.in') || origin.includes('localhost:5174');
-      
-      console.log(`🔐 Login attempt - Origin: ${origin}, User: ${username}, Role: ${user.role}, isCRM: ${isCRM}, isDashboard: ${isDashboard}`);
-      
-      // If we can't determine origin, reject for security
-      if (!isCRM && !isDashboard && origin) {
-        console.log(`⚠️  Unknown origin: ${origin}`);
+      if (needsRehash(user.password)) {
+        await upgradeLegacyPassword(pool, user.id, password);
       }
-      
-      // CRM: Only sales role can login
-      if (isCRM && user.role !== 'sales') {
-        console.log(`❌ CRM login blocked for role: ${user.role}`);
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Invalid credentials' 
-        });
-      }
-      
-      // Dashboard: Only admin and therapist roles can login
-      if (isDashboard && user.role !== 'admin' && user.role !== 'therapist') {
-        console.log(`❌ Dashboard login blocked for role: ${user.role}`);
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Invalid credentials' 
-        });
-      }
-      
+
+      // Never send the stored password hash back to the client — the frontend
+      // persists this whole object in localStorage.
+      delete user.password;
+
       console.log(`✅ Login successful for ${username} (${user.role})`);
 
 
@@ -199,11 +180,11 @@ app.post('/api/verify-password', async (req, res) => {
     const { username, password } = req.body;
 
     const result = await pool.query(
-      'SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND password = $2',
-      [username, password]
+      'SELECT password FROM users WHERE LOWER(username) = LOWER($1)',
+      [username]
     );
 
-    if (result.rows.length > 0) {
+    if (result.rows.length > 0 && await verifyPassword(password, result.rows[0].password)) {
       res.json({ success: true });
     } else {
       res.json({ success: false });
@@ -229,7 +210,7 @@ app.post('/api/change-password', async (req, res) => {
 
     const result = await pool.query(
       'UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2 RETURNING id, username',
-      [newPassword, userId]
+      [await hashPassword(newPassword), userId]
     );
 
     if (result.rows.length > 0) {
@@ -378,12 +359,14 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
     const specializationDetailsJson = specializationDetails ? JSON.stringify(specializationDetails) : '[]';
     console.log('📦 Serialized specialization details:', specializationDetailsJson);
 
+    const passwordHash = await hashPassword(password);
+
     // Insert into therapist_details table
     console.log('💾 Inserting into therapist_details table...');
     console.log('Values:', {
       requestId, name, email, phone, specializations,
       specializationDetailsJson, qualification,
-      qualificationPdfUrl, profilePictureUrl, password
+      qualificationPdfUrl, profilePictureUrl
     });
 
     const detailsResult = await pool.query(
@@ -397,7 +380,7 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
       [
         requestId, name, email, phone, specializations,
         specializationDetailsJson, qualification || null,
-        qualificationPdfUrl || null, profilePictureUrl || null, password
+        qualificationPdfUrl || null, profilePictureUrl || null, passwordHash
       ]
     );
 
@@ -465,7 +448,7 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
         await pool.query(
           `INSERT INTO users (username, password, name, email, role, full_name, phone, profile_picture_url, therapist_id, created_at)
            VALUES ($1, $2, $3, $4, 'therapist', $5, $6, $7, $8, NOW())`,
-          [email, password, name, email, name, phone, profilePictureUrl, therapistId]
+          [email, passwordHash, name, email, name, phone, profilePictureUrl, therapistId]
         );
         console.log('✅ User account created for:', email, 'with therapist_id:', therapistId);
       } else {
@@ -473,7 +456,7 @@ app.post('/api/complete-therapist-profile', async (req, res) => {
         await pool.query(
           `UPDATE users SET password = $1, name = $2, full_name = $3, phone = $4, profile_picture_url = $5, therapist_id = $6
            WHERE LOWER(email) = LOWER($7)`,
-          [password, name, name, phone, profilePictureUrl, therapistId, email]
+          [passwordHash, name, name, phone, profilePictureUrl, therapistId, email]
         );
         console.log('✅ User account updated for:', email, 'with therapist_id:', therapistId);
       }
@@ -2007,7 +1990,7 @@ app.post('/api/update-password', async (req, res) => {
 
     const result = await pool.query(
       `UPDATE users SET password = $1 WHERE id = $2 RETURNING id`,
-      [new_password, user_id]
+      [await hashPassword(new_password), user_id]
     );
 
     if (result.rows.length === 0) {
@@ -2211,7 +2194,7 @@ app.post('/api/forgot-password/reset', async (req, res) => {
     // Update password
     const updateResult = await pool.query(
       `UPDATE users SET password = $1 WHERE id = $2 RETURNING id, username`,
-      [newPassword, resetRecord.user_id]
+      [await hashPassword(newPassword), resetRecord.user_id]
     );
 
     if (updateResult.rows.length === 0) {
