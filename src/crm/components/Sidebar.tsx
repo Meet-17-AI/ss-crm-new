@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { User, Eye, LogOut, BarChart3, Columns3, Users, ClipboardCheck } from 'lucide-react'
 import { Logo } from '../../../components/Logo'
+import { DashboardSwitcher } from '../../../components/DashboardSwitcher'
 
 interface SidebarProps {
   currentPage: string
@@ -133,6 +134,10 @@ const Sidebar = ({ currentPage, setCurrentPage, currentUser, onLogout }: Sidebar
             </button>
           </div>
         )}
+
+        {/* Sits directly above the profile card. Renders nothing unless this
+            user holds a dashboard beyond the CRM. */}
+        <DashboardSwitcher className="mb-3" />
 
         <div className="flex items-center gap-3 rounded-lg p-3 cursor-pointer hover:bg-gray-100" style={{ backgroundColor: '#2D757930' }} onClick={() => setShowProfileMenu(!showProfileMenu)}>
           {profilePictureUrl ? (

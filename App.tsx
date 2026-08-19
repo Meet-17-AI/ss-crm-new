@@ -12,6 +12,24 @@ import { BookingConfirmation } from './components/BookingConfirmation';
 import { SessionNotesPage } from './components/SessionNotesPage';
 import CRMApp from './src/crm/App';
 import { Monitor } from 'lucide-react';
+import { setToken, clearToken, getToken } from './lib/authFetch';
+
+/**
+ * A one-time ticket from the panel, carried in the URL FRAGMENT.
+ *
+ * The fragment rather than the query string on purpose: fragments are never sent
+ * to a server, so the ticket stays out of access logs and Referer headers. It is
+ * stripped from the address bar as soon as it is read, and it is single-use
+ * server-side regardless.
+ */
+const readHandoffTicket = (): string | null => {
+  const m = window.location.hash.match(/(?:^|[#&])t=([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+};
+
+const stripHandoffFromUrl = () => {
+  window.history.replaceState({}, '', window.location.pathname + window.location.search);
+};
 
 // Public routes — no auth needed
 const renderPublicRoute = (path: string) => {
@@ -30,8 +48,8 @@ const renderPublicRoute = (path: string) => {
   return null;
 };
 
-const getPathForRole = (user: any): string => {
-  if (user?.role === 'therapist') return '/therapist';
+const getPathForRole = (user: any, forceCrm = false): string => {
+  if (user?.role === 'therapist' && !forceCrm) return '/therapist';
   return '/crm';
 };
 
@@ -43,6 +61,14 @@ const loadSavedUser = () => {
     // Clear stale sessions with old sales_role field
     if ('sales_role' in parsed) {
       localStorage.clear();
+      return null;
+    }
+    // A stored user with no token predates token auth, or the token was cleared
+    // after a 401. Every API call would fail, so treat it as signed out rather
+    // than rendering a shell that cannot load anything.
+    if (!getToken()) {
+      localStorage.removeItem('user');
+      localStorage.removeItem('isLoggedIn');
       return null;
     }
     return parsed;
@@ -67,13 +93,67 @@ const App: React.FC = () => {
   });
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
+  // A ticket in the URL means we arrived from the panel's dashboard switcher.
+  // Held in state so the login form is never shown while the exchange is in
+  // flight — otherwise the user sees a sign-in page flash for someone who is
+  // already signed in, which is the whole thing this is meant to avoid.
+  const [handoff, setHandoff] = useState<'none' | 'pending' | 'failed'>(
+    () => (readHandoffTicket() ? 'pending' : 'none')
+  );
+  const [handoffError, setHandoffError] = useState<string>('');
+
+  // Sticky across reloads, so refreshing the CRM does not bounce a therapist to
+  // their own dashboard. Cleared on logout.
+  const [forceCrm, setForceCrm] = useState<boolean>(
+    () => localStorage.getItem('landedOnCrm') === 'true'
+  );
+
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const handleLogin = (userData: any) => {
+  useEffect(() => {
+    const ticket = readHandoffTicket();
+    if (!ticket) return;
+    // Out of the address bar immediately — before the request, so a reload or a
+    // shared URL cannot replay it even though the server would also refuse.
+    stripHandoffFromUrl();
+
+    (async () => {
+      try {
+        const res = await fetch('/api/handoff/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticket }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.token) {
+          throw new Error(data?.error || `Sign-in handoff failed (HTTP ${res.status})`);
+        }
+        setToken(data.token);
+        setUser(data.user);
+        setIsLoggedIn(true);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.setItem('isLoggedIn', 'true');
+        // They asked for the CRM. Without this a therapist would be handed their
+        // therapist dashboard by the role rule below — the one screen they were
+        // switching away FROM.
+        setForceCrm(true);
+        localStorage.setItem('landedOnCrm', 'true');
+        setHandoff('none');
+      } catch (e: any) {
+        // Fall back to the normal login form with an explanation, rather than a
+        // blank screen or a silent bounce.
+        setHandoffError(e?.message || 'Could not sign you in from the panel.');
+        setHandoff('failed');
+      }
+    })();
+  }, []);
+
+  const handleLogin = (userData: any, token?: string) => {
+    if (token) setToken(token);
     setUser(userData);
     setIsLoggedIn(true);
     localStorage.setItem('user', JSON.stringify(userData));
@@ -85,12 +165,28 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    clearToken();
     setUser(null);
     setIsLoggedIn(false);
+    setForceCrm(false);
     localStorage.removeItem('user');
     localStorage.removeItem('isLoggedIn');
+    localStorage.removeItem('landedOnCrm');
     window.history.pushState({}, '', '/');
   };
+
+  // The ticket is still being exchanged. Showing the login form here would ask
+  // someone who is already signed in to sign in again.
+  if (handoff === 'pending') {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-teal-500 border-t-transparent" />
+          <p className="text-sm text-gray-500">Signing you in…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (isMobile) {
     return (
@@ -113,12 +209,14 @@ const App: React.FC = () => {
     const role = user.role?.toLowerCase();
 
     // Keep URL in sync with role
-    const correctPath = getPathForRole(user);
+    const correctPath = getPathForRole(user, forceCrm);
     if (path !== correctPath) {
       window.history.replaceState({}, '', correctPath);
     }
 
-    if (role === 'therapist') return <TherapistDashboard onLogout={handleLogout} user={user} />;
+    if (role === 'therapist' && !forceCrm) {
+      return <TherapistDashboard onLogout={handleLogout} user={user} />;
+    }
     return <CRMApp user={user} onLogout={handleLogout} />;
   }
 

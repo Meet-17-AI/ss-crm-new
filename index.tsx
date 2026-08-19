@@ -1,6 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { installAuthFetch } from './lib/authFetch';
+
+// Before anything renders, so the first request a component makes already carries
+// the token rather than 401ing on mount.
+installAuthFetch();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

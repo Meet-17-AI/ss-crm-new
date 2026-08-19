@@ -83,3 +83,7 @@ START_*.md
 TROUBLESHOOTING_*.md
 TRULY_*.md
 UPDATE_*.md
+
+# Local deploy-watch helper. Contains a hardcoded production database password
+# and connects to production directly — must never be committed.
+__deploywatch.cjs

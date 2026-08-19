@@ -27,6 +27,11 @@ import { startDashboardApiBookingSync } from './dashboardApiBookingSync';
 import { uploadFile } from './lib/minio';
 import { sendOTPEmail, sendPasswordResetOTP } from './lib/email';
 import { logWebhookApi } from './lib/webhookApiLogger.js';
+import {
+  authGate, scopeGate, requireScope, requireTherapistScope, issueToken, loadScopes,
+  requireClientRecordAccess, mayAccessClientRecords, allowedOrigins, getShadowDenials,
+} from './lib/access';
+import jwt from 'jsonwebtoken';
 
 // Configure multer for memory storage
 const upload = multer({
@@ -73,8 +78,29 @@ const TIMESTAMP_COLUMN_MAP: Record<string, string> = {
 };
 
 const app = express();
-app.use(cors());
+
+// Only origins we name, and credentials allowed. The previous bare cors()
+// reflected every origin, so any site a signed-in user visited could call this
+// API as them.
+app.use(cors({
+  origin: allowedOrigins(),
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
+
+// Everything under /api needs a valid token except the public allowlist in
+// lib/access.ts. Registered here — before any route is defined — so a route
+// added later is closed by default rather than open by omission.
+//
+// Until now this service had NO authentication whatsoever: all 111 routes,
+// including case histories, progress notes, session notes and SOS
+// documentation, answered anyone who knew the URL.
+app.use(authGate);
+
+// Dashboard-scope gate. Shadow mode until ACCESS_ENFORCE=true.
+app.use(scopeGate);
 
 // Login endpoint
 app.post('/api/login', async (req, res) => {
@@ -164,13 +190,146 @@ app.post('/api/login', async (req, res) => {
         }
       }
 
-      res.json({ success: true, user });
+      // A token, at last. This response previously carried only the user object,
+      // because nothing downstream ever checked one — the frontend put that
+      // object in localStorage and that WAS the session.
+      //
+      // Signed with the secret panel-backend uses, so the same token is valid on
+      // both services. That is the groundwork for switching dashboards without a
+      // second sign-in.
+      res.json({ success: true, user, token: issueToken(user) });
     } else {
       res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ success: false, message: 'Login failed' });
+  }
+});
+
+/**
+ * Redeem a one-time ticket issued by the panel and start a session here.
+ *
+ * This is what makes "switch to CRM" arrive already signed in. The CRM runs on a
+ * different origin, so it cannot read the panel's stored token; the panel vouches
+ * for the user with a ticket instead.
+ *
+ * Three things must hold, and all three are checked:
+ *   1. the signature — proves the panel issued it (shared JWT_SECRET)
+ *   2. the row still exists — proves it has not already been spent
+ *   3. the scope — the holder must actually have CRM access right now
+ *
+ * The DELETE enforces single use: it is atomic, so two simultaneous redemptions
+ * cannot both find the row. Anything later recovered from browser history or a
+ * referrer header is already worthless.
+ */
+app.post('/api/handoff/redeem', async (req, res) => {
+  try {
+    const ticket = String(req.body?.ticket || '');
+    if (!ticket) return res.status(400).json({ error: 'Missing ticket' });
+
+    let claims: any;
+    try {
+      claims = jwt.verify(ticket, process.env.JWT_SECRET as string);
+    } catch {
+      return res.status(401).json({ error: 'Invalid or expired handoff' });
+    }
+    if (claims?.purpose !== 'handoff' || !claims?.jti) {
+      // A normal session token must not work here — that would turn this public
+      // route into a way to mint fresh sessions from a stolen one indefinitely.
+      return res.status(401).json({ error: 'Invalid or expired handoff' });
+    }
+
+    const spent = await pool.query(
+      `DELETE FROM auth_handoff_tokens
+        WHERE jti = $1 AND expires_at > now()
+        RETURNING user_id, scope`,
+      [claims.jti]
+    );
+    if (spent.rows.length === 0) {
+      return res.status(401).json({ error: 'This handoff link has already been used or has expired.' });
+    }
+
+    const { rows } = await pool.query(
+      'SELECT * FROM users WHERE id = $1 AND (is_active IS DISTINCT FROM false)',
+      [spent.rows[0].user_id]
+    );
+    if (rows.length === 0) return res.status(401).json({ error: 'Account is unavailable' });
+
+    const user = rows[0];
+    delete user.password;
+
+    // Re-checked here rather than trusted from the ticket: access can be revoked
+    // between issuing and redeeming, and the newer answer is the right one.
+    if (!(await loadScopes(user)).has('crm')) {
+      return res.status(403).json({ error: 'This account does not have CRM access.' });
+    }
+
+    res.json({ success: true, user, token: issueToken(user) });
+  } catch (error: any) {
+    console.error('[handoff] redeem failed:', error?.message || error);
+    res.status(500).json({ error: 'Could not complete the handoff' });
+  }
+});
+
+/**
+ * What the CALLER may open. Drives the CRM's dashboard switcher.
+ *
+ * Same shape as the panel's /api/me/access, and read from the database on every
+ * call rather than from the token, so a grant or revoke takes effect on the next
+ * page load instead of whenever the 24h token expires.
+ */
+app.get('/api/me/access', async (req: any, res) => {
+  try {
+    res.json({
+      role: req.user?.role ?? null,
+      scopes: Array.from(await loadScopes(req.user)),
+    });
+  } catch (error: any) {
+    console.error('[access] /api/me/access failed:', error?.message || error);
+    res.status(500).json({ error: 'Could not load access' });
+  }
+});
+
+/**
+ * Hand this session back to the panel — the mirror of /api/handoff on the panel.
+ *
+ * Switching has to work in both directions or it is a trapdoor: a therapist who
+ * moves to the CRM would have to log in again to get back to their own dashboard.
+ *
+ * Same rules as the outbound direction: a single-use ticket rather than the
+ * session token, 60 second life, and the scope verified here before issuing —
+ * the other service must not be the only thing standing between a user and a
+ * dashboard they were never granted.
+ */
+app.post('/api/handoff', async (req: any, res) => {
+  try {
+    const target = String(req.body?.target || '');
+    if (target !== 'admin_dashboard' && target !== 'therapist_dashboard') {
+      return res.status(400).json({ error: 'Unknown target' });
+    }
+    if (!(await loadScopes(req.user)).has(target)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+
+    const jti = randomUUID() + randomUUID().replace(/-/g, '');
+    const ttlSeconds = 60;
+    await pool.query(
+      `INSERT INTO auth_handoff_tokens (jti, user_id, scope, expires_at)
+       VALUES ($1, $2, $3, now() + ($4 || ' seconds')::interval)`,
+      [jti, req.user.id, target, String(ttlSeconds)]
+    );
+
+    const ticket = jwt.sign(
+      { purpose: 'handoff', jti, id: req.user.id, scope: target },
+      process.env.JWT_SECRET as string,
+      { expiresIn: ttlSeconds }
+    );
+
+    res.json({ ticket, expiresIn: ttlSeconds });
+  } catch (error: any) {
+    console.error('[handoff] issue failed:', error?.message || error);
+    res.status(500).json({ error: 'Could not start the handoff' });
   }
 });
 
@@ -3393,7 +3552,7 @@ app.get('/api/therapists-live-status', async (req, res) => {
 });
 
 // Get scheduleId for a specific therapist from therapist_resources
-app.get('/api/therapist-schedule', async (req, res) => {
+app.get('/api/therapist-schedule', requireTherapistScope(r => r.query.therapist_id), async (req, res) => {
   try {
     const { therapist_id } = req.query;
     if (!therapist_id) {
@@ -3696,7 +3855,7 @@ app.get('/api/client-details', async (req, res) => {
 });
 
 // Get therapist stats
-app.get('/api/therapist-stats', async (req, res) => {
+app.get('/api/therapist-stats', requireTherapistScope(r => r.query.therapist_id), async (req, res) => {
   try {
     // Prevent caching of stats data
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
@@ -3905,7 +4064,7 @@ app.get('/api/therapist-stats', async (req, res) => {
 });
 
 // Get therapist appointments
-app.get('/api/therapist-appointments', async (req, res) => {
+app.get('/api/therapist-appointments', requireTherapistScope(r => r.query.therapist_id), async (req, res) => {
   try {
     const { therapist_id } = req.query;
 
@@ -3970,7 +4129,7 @@ app.get('/api/therapist-appointments', async (req, res) => {
 });
 
 // Get therapist clients
-app.get('/api/therapist-clients', async (req, res) => {
+app.get('/api/therapist-clients', requireTherapistScope(r => r.query.therapist_id), async (req, res) => {
   try {
     const { therapist_id } = req.query;
 
@@ -4547,7 +4706,7 @@ app.post('/api/additional-notes', async (req, res) => {
 });
 
 // Get session notes
-app.get('/api/session-notes', async (req, res) => {
+app.get('/api/session-notes', requireClientRecordAccess(r => ({ bookingId: r.query.booking_id })), async (req, res) => {
   try {
     const { booking_id } = req.query;
 
@@ -6028,7 +6187,7 @@ app.post('/api/session-documentation', async (req, res) => {
 });
 
 // 2. Get case history
-app.get('/api/case-history', async (req, res) => {
+app.get('/api/case-history', requireClientRecordAccess(r => ({ clientId: r.query.client_id, bookingId: r.query.booking_id })), async (req, res) => {
   try {
     const { client_id, booking_id } = req.query;
 
@@ -6123,6 +6282,20 @@ app.put('/api/case-history/:id', async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
+    // Read first so the write can be refused on ownership. Checking after the
+    // UPDATE would be too late — the record would already have changed.
+    const existing = await pool.query(
+      'SELECT client_id, booking_id FROM client_case_history WHERE id = $1', [id]
+    );
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Case history not found' });
+    }
+    if (!(await mayAccessClientRecords(req, {
+      clientId: existing.rows[0].client_id, bookingId: existing.rows[0].booking_id,
+    }))) {
+      return res.status(403).json({ error: "These records belong to another therapist's client." });
+    }
+
     const result = await pool.query(`
       UPDATE client_case_history 
       SET ${Object.keys(updates).map((key, i) => `${key} = $${i + 2}`).join(', ')},
@@ -6143,7 +6316,7 @@ app.put('/api/case-history/:id', async (req, res) => {
 });
 
 // 4. Get progress notes list
-app.get('/api/progress-notes', async (req, res) => {
+app.get('/api/progress-notes', requireClientRecordAccess(r => ({ clientId: r.query.client_id })), async (req, res) => {
   try {
     const { client_id } = req.query;
 
@@ -6217,6 +6390,14 @@ app.get('/api/progress-notes/:id', async (req, res) => {
       [id]
     );
 
+    // Checked after the fetch: the row is what says whose client this is, and
+    // the id in the URL carries no ownership of its own.
+    if (result.rows.length > 0 && !(await mayAccessClientRecords(req, {
+      clientId: result.rows[0].client_id, bookingId: result.rows[0].booking_id,
+    }))) {
+      return res.status(403).json({ error: "These records belong to another therapist's client." });
+    }
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Progress note not found' });
     }
@@ -6286,7 +6467,7 @@ app.get('/api/therapy-goals', async (req, res) => {
 });
 
 // 6a. Get free consultation notes list
-app.get('/api/free-consultation-notes', async (req, res) => {
+app.get('/api/free-consultation-notes', requireClientRecordAccess(r => ({ clientId: r.query.client_id })), async (req, res) => {
   try {
     const { client_id } = req.query;
 
@@ -6319,6 +6500,14 @@ app.get('/api/free-consultation-notes/:id', async (req, res) => {
       'SELECT * FROM free_consultation_pretherapy_notes WHERE id = $1',
       [id]
     );
+
+    // Checked after the fetch: the row is what says whose client this is, and
+    // the id in the URL carries no ownership of its own.
+    if (result.rows.length > 0 && !(await mayAccessClientRecords(req, {
+      clientId: result.rows[0].client_id, bookingId: result.rows[0].booking_id,
+    }))) {
+      return res.status(403).json({ error: "These records belong to another therapist's client." });
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Free consultation note not found' });
@@ -6798,7 +6987,7 @@ app.get('/api/client-session-type', async (req, res) => {
 });
 
 // 10. Get free consultation notes
-app.get('/api/free-consultation-notes', async (req, res) => {
+app.get('/api/free-consultation-notes', requireClientRecordAccess(r => ({ clientId: r.query.client_id })), async (req, res) => {
   try {
     const { client_id } = req.query;
 
@@ -6827,6 +7016,14 @@ app.get('/api/free-consultation-notes/:id', async (req, res) => {
       'SELECT * FROM free_consultation_pretherapy_notes WHERE id = $1',
       [id]
     );
+
+    // Checked after the fetch: the row is what says whose client this is, and
+    // the id in the URL carries no ownership of its own.
+    if (result.rows.length > 0 && !(await mayAccessClientRecords(req, {
+      clientId: result.rows[0].client_id, bookingId: result.rows[0].booking_id,
+    }))) {
+      return res.status(403).json({ error: "These records belong to another therapist's client." });
+    }
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Free consultation note not found' });
@@ -6861,7 +7058,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-const PORT = 3003;
+// Render (and most PaaS) assign the port and pass it in — binding to a fixed one
+// means the health check never connects and the deploy is marked failed. Falls
+// back to 3003 for local development, which is what the CRM's vite proxy expects.
+const PORT = parseInt(process.env.PORT || '3003');
 const httpServer = createServer(app);
 
 export const io = new SocketIOServer(httpServer, {
