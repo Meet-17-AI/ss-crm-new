@@ -1,8 +1,6 @@
 {
   "rewrites": [
-    { "source": "/api/sos-documentation", "destination": "https://crm.backend.srv1169280.hstgr.cloud/api/sos-documentation" },
-    { "source": "/api/crm/:path*", "destination": "https://crm.backend.srv1169280.hstgr.cloud/api/crm/:path*" },
-    { "source": "/api/:path*", "destination": "https://crm.backend.srv1169280.hstgr.cloud/api/:path*" },
+    { "source": "/api/:path*", "destination": "https://ss-crm-backend.onrender.com/api/:path*" },
     { "source": "/sos-view/:token", "destination": "/index.html" },
     { "source": "/((?!api).*)", "destination": "/index.html" }
   ],
@@ -16,8 +14,5 @@
         }
       ]
     }
-  ],
-  "env": {
-    "VITE_VERCEL": "1"
-  }
+  ]
 }
