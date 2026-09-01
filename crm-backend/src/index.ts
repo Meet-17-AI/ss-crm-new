@@ -29,7 +29,7 @@ import { sendOTPEmail, sendPasswordResetOTP } from './lib/email';
 import { logWebhookApi } from './lib/webhookApiLogger.js';
 import {
   authGate, scopeGate, requireScope, requireTherapistScope, issueToken, loadScopes,
-  requireClientRecordAccess, mayAccessClientRecords, allowedOrigins, getShadowDenials,
+  requireClientRecordAccess, mayAccessClientRecords, allowedOrigins, getShadowDenials, isEnforcing,
 } from './lib/access';
 import jwt from 'jsonwebtoken';
 import { authLimiter, apiLimiter } from './lib/rateLimit';
@@ -378,6 +378,20 @@ app.post('/api/handoff', async (req: any, res) => {
  * already holding the session; there is no case where it needs to answer for
  * somebody else. Rate-limited on top by AUTH_RATE_LIMITED above.
  */
+/**
+ * What the scope gate WOULD have blocked, while it runs in shadow mode.
+ *
+ * The list to read before removing ACCESS_ENFORCE=false. panel-backend has had
+ * this endpoint all along; this service imported getShadowDenials and never
+ * exposed it, so half the rollout evidence was unreachable — and the two
+ * services must be flipped together, which is impossible to judge from one.
+ *
+ * An empty list on BOTH means nothing legitimate is being caught.
+ */
+app.get('/api/admin/access-shadow-denials', requireScope('admin_dashboard'), (_req: any, res) => {
+  res.json({ enforcing: isEnforcing(), denials: getShadowDenials() });
+});
+
 app.post('/api/verify-password', async (req: any, res) => {
   try {
     const { password } = req.body;

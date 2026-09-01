@@ -376,6 +376,9 @@ const SCOPED_ROUTES: { pattern: RegExp; scope: Scope }[] = [
  */
 const ENFORCING = String(process.env.ACCESS_ENFORCE ?? 'true').toLowerCase() !== 'false';
 
+/** The gate's real state, for the diagnostic endpoint. See panel-backend. */
+export const isEnforcing = (): boolean => ENFORCING;
+
 const shadowSeen = new Map<string, { route: string; role: string; scope: Scope; count: number; firstAt: string; lastAt: string }>();
 export const getShadowDenials = () => Array.from(shadowSeen.values()).sort((a, b) => b.count - a.count);
 
