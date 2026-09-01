@@ -32,6 +32,8 @@ import {
   requireClientRecordAccess, mayAccessClientRecords, allowedOrigins, getShadowDenials,
 } from './lib/access';
 import jwt from 'jsonwebtoken';
+import { authLimiter, apiLimiter } from './lib/rateLimit';
+import { securityHeaders } from './lib/securityHeaders';
 
 // Configure multer for memory storage
 const upload = multer({
@@ -79,6 +81,12 @@ const TIMESTAMP_COLUMN_MAP: Record<string, string> = {
 
 const app = express();
 
+// This service runs behind Hostinger's proxy, so req.ip is the proxy's address
+// unless this is set — and every rate limiter below keys on req.ip. Without it
+// the whole internet shares one bucket. `1` = trust exactly one hop; trusting
+// all of them would let a caller forge X-Forwarded-For for a fresh bucket.
+app.set('trust proxy', 1);
+
 // Only origins we name, and credentials allowed. The previous bare cors()
 // reflected every origin, so any site a signed-in user visited could call this
 // API as them.
@@ -90,6 +98,10 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// CSP and friends, on every response. Must mirror panel-backend: a token stolen
+// from either origin is honoured by both.
+app.use(securityHeaders);
+
 // Everything under /api needs a valid token except the public allowlist in
 // lib/access.ts. Registered here — before any route is defined — so a route
 // added later is closed by default rather than open by omission.
@@ -97,10 +109,29 @@ app.use(express.json());
 // Until now this service had NO authentication whatsoever: all 111 routes,
 // including case histories, progress notes, session notes and SOS
 // documentation, answered anyone who knew the URL.
+// Rate limits, BEFORE the auth gate — credential guessing is exactly the
+// traffic that never gets past authentication, so a limiter behind the gate
+// would never see it. Mirrors panel-backend; the two must not drift.
+const AUTH_RATE_LIMITED = /^\/api\/(login|verify-password|forgot-password\/|handoff\/redeem|verify-therapist-otp)/;
+
+app.use((req: any, res: any, next: any) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (req.method === 'OPTIONS') return next();
+  if (AUTH_RATE_LIMITED.test(req.path)) return authLimiter(req, res, next);
+  return next();
+});
+
 app.use(authGate);
 
 // Dashboard-scope gate. Shadow mode until ACCESS_ENFORCE=true.
 app.use(scopeGate);
+
+// Backstop for authenticated traffic, keyed per user now that req.user exists.
+app.use((req: any, res: any, next: any) => {
+  if (!req.path.startsWith('/api/')) return next();
+  if (req.method === 'OPTIONS') return next();
+  return apiLimiter(req, res, next);
+});
 
 // Login endpoint
 app.post('/api/login', async (req, res) => {
@@ -333,15 +364,27 @@ app.post('/api/handoff', async (req: any, res) => {
   }
 });
 
-// Verify password endpoint (for case history access)
-app.post('/api/verify-password', async (req, res) => {
+/**
+ * Re-confirm the CALLER'S OWN password, before opening a case history.
+ *
+ * The username is taken from the session, never from the request body. It used
+ * to accept any username and answer {success: true|false} — so any signed-in
+ * account, including the lowest-privilege sales user, could test password
+ * guesses against every other account, superadmins included, as fast as the
+ * server would answer. HTTP 200 either way meant the failures did not even
+ * register as an error rate.
+ *
+ * A re-confirmation prompt should only ever be able to confirm the person
+ * already holding the session; there is no case where it needs to answer for
+ * somebody else. Rate-limited on top by AUTH_RATE_LIMITED above.
+ */
+app.post('/api/verify-password', async (req: any, res) => {
   try {
-    const { username, password } = req.body;
+    const { password } = req.body;
+    if (!req.user?.id) return res.status(401).json({ success: false, message: 'Authentication required' });
+    if (!password) return res.status(400).json({ success: false, message: 'Password is required' });
 
-    const result = await pool.query(
-      'SELECT password FROM users WHERE LOWER(username) = LOWER($1)',
-      [username]
-    );
+    const result = await pool.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
 
     if (result.rows.length > 0 && await verifyPassword(password, result.rows[0].password)) {
       res.json({ success: true });
@@ -1065,9 +1108,9 @@ app.post('/api/leads/convert-virtual', async (req, res) => {
   }
 });
 
-app.patch('/api/leads/:id/stage', async (req, res) => {
+app.patch('/api/leads/:id/stage', async (req: any, res) => {
   const { id } = req.params;
-  const { pipeline_stage, remark, follow_up_date } = req.body;
+  const { pipeline_stage, remark, follow_up_date, future_action, _audit_user } = req.body;
   if (!pipeline_stage) {
     return res.status(400).json({ error: 'pipeline_stage is required' });
   }
@@ -1186,27 +1229,35 @@ app.patch('/api/leads/:id/stage', async (req, res) => {
       }
     }
 
-    const timestampUpdate = tsCol ? `, ${tsCol} = NOW()` : '';
-    const therapistUpdate = therapistIdToSet ? `, therapist_id = ${therapistIdToSet}` : '';
-    let query, values;
+    // Built as a clause list rather than four hand-written variants: every caller
+    // sends a different subset (remark, follow-up date, future action), and the
+    // combinations multiply. Column names come from the fixed maps above;
+    // everything the caller supplied is parameterised.
+    const setClauses: string[] = ['pipeline_stage = $1'];
+    const values: any[] = [pipeline_stage];
+    let idx = 2;
 
     if (remarkCol && remark) {
-      if (follow_up_date && pipeline_stage === 'followup-1') {
-        query = `UPDATE leads SET pipeline_stage = $1, ${remarkCol} = $2${timestampUpdate}${therapistUpdate}, follow_up_1_date = $4, updated_at = NOW() WHERE id::text = $3 RETURNING *`;
-        values = [pipeline_stage, remark, id, follow_up_date];
-      } else {
-        query = `UPDATE leads SET pipeline_stage = $1, ${remarkCol} = $2${timestampUpdate}${therapistUpdate}, updated_at = NOW() WHERE id::text = $3 RETURNING *`;
-        values = [pipeline_stage, remark, id];
-      }
-    } else {
-      if (follow_up_date && pipeline_stage === 'followup-1') {
-        query = `UPDATE leads SET pipeline_stage = $1${timestampUpdate}${therapistUpdate}, follow_up_1_date = $3, updated_at = NOW() WHERE id::text = $2 RETURNING *`;
-        values = [pipeline_stage, id, follow_up_date];
-      } else {
-        query = `UPDATE leads SET pipeline_stage = $1${timestampUpdate}${therapistUpdate}, updated_at = NOW() WHERE id::text = $2 RETURNING *`;
-        values = [pipeline_stage, id];
-      }
+      setClauses.push(`${remarkCol} = $${idx++}`);
+      values.push(remark);
     }
+    if (tsCol) setClauses.push(`${tsCol} = NOW()`);
+    // Resolved from our own bookings lookup above, never from the request body.
+    if (therapistIdToSet) setClauses.push(`therapist_id = ${therapistIdToSet}`);
+    if (follow_up_date && pipeline_stage === 'followup-1') {
+      setClauses.push(`follow_up_1_date = $${idx++}`);
+      values.push(follow_up_date);
+    }
+    // Was accepted by the pipeline and then dropped on the floor here, so the
+    // "Action: Call" badge only ever showed values written by some other path.
+    if (future_action) {
+      setClauses.push(`future_action = $${idx++}`);
+      values.push(future_action);
+    }
+    setClauses.push('updated_at = NOW()');
+    values.push(id);
+
+    const query = `UPDATE leads SET ${setClauses.join(', ')} WHERE id::text = $${idx} RETURNING *`;
 
     await pool.query(query, values);
 
@@ -1227,17 +1278,28 @@ app.patch('/api/leads/:id/stage', async (req, res) => {
         'followup-1': 'Follow Up',
         'pretherapy-call': 'Pre-therapy Call',
         'booked-first-session': 'Booked First Session',
-        'dropouts-unresponsive': 'Dropouts (Unresponsive)',
+        // The stage id is 'dropouts'; the old key here was never matched, so
+        // unresponsive moves logged the raw id.
+        'dropouts': 'Unresponsive',
         'referred': 'Referred',
         'closed': 'Closed'
       };
       const stageName = stageNames[pipeline_stage] || pipeline_stage;
       const oldStageName = stageNames[currentLead.pipeline_stage] || currentLead.pipeline_stage;
-      
+
+      // Name whoever actually did it. 'Sales Agent' was hardcoded, which made the
+      // log useless for the one question it gets asked: who moved this lead?
+      //
+      // Taken from the verified token, not from _audit_user in the body — an audit
+      // trail the caller can write its own name into records nothing. The body
+      // value is only a fallback for a caller with no token identity.
+      const actorId = req.user?.id ?? _audit_user?.id ?? null;
+      const actorName = req.user?.username || _audit_user?.name || 'Sales Agent';
+
       await pool.query(
-        `INSERT INTO crm_audit_logs (user_name, action_type, action_description, lead_id, lead_name)
-         VALUES ($1, $2, $3, $4, $5)`,
-        ['Sales Agent', 'lead_stage_change', `Moved lead from "${oldStageName}" to "${stageName}"`, leadData.id, leadData.name]
+        `INSERT INTO crm_audit_logs (user_id, user_name, action_type, action_description, lead_id, lead_name)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [actorId, actorName, 'lead_stage_change', `Moved lead from "${oldStageName}" to "${stageName}"`, leadData.id, leadData.name]
       );
     } catch (auditErr) {
       console.error('Error creating audit log:', auditErr);
@@ -1743,18 +1805,21 @@ app.post('/api/pretherapy-form', async (req, res) => {
     );
 
     // AUTOMATION: Move lead stage based on consultation outcome
-    let targetStage = null;
-    let newTags = null;
-
-    if (consultation_outcome === 'Session booked') {
-      targetStage = 'booked-first-session';
-    } else if (consultation_outcome === 'To be followed up') {
-      targetStage = 'followup-1';
-    } else if (consultation_outcome === 'Referred') {
-      targetStage = 'referred';
-    } else if (consultation_outcome === 'Closed - Reason') {
-      targetStage = 'closed';
-    }
+    //
+    // Compared case-insensitively. The form offers "To be Followed up" and this
+    // tested for "To be followed up", so that one outcome never routed: the card
+    // animated into Follow Ups and snapped back to Pre-therapy Call on reload.
+    // Mirrors resolveFinalStage in the frontend's lib/leadStage.
+    const OUTCOME_STAGE: Record<string, string> = {
+      'session booked': 'booked-first-session',
+      'to be followed up': 'followup-1',
+      'referred': 'referred',
+      'closed - reason': 'closed',
+    };
+    const targetStage = consultation_outcome
+      ? OUTCOME_STAGE[String(consultation_outcome).trim().toLowerCase()] || null
+      : null;
+    const newTags = null;
 
     if (targetStage) {
       const tsCol = TIMESTAMP_COLUMN_MAP[targetStage];

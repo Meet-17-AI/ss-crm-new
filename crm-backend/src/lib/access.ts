@@ -58,20 +58,46 @@ export function issueToken(user: { id: any; username?: string; role: string; the
   );
 }
 
-export type Scope = 'admin_dashboard' | 'therapist_dashboard' | 'crm';
-export const ALL_SCOPES: Scope[] = ['admin_dashboard', 'therapist_dashboard', 'crm'];
+/**
+ * MUST match panel-backend/src/lib/access.ts exactly.
+ *
+ * `superadmin` was missing here, and the divergence was silent rather than loud:
+ * loadScopes() filters grant rows through isScope(), so a superadmin grant was
+ * discarded by this service without a word while the panel honoured it. Nothing
+ * in the CRM gates on it today, which is why it caused no visible damage — but
+ * "the two copies disagree about what a scope even is" is the failure this file
+ * header warns about, and the first superadmin-only CRM surface would have
+ * inherited it.
+ */
+export type Scope = 'admin_dashboard' | 'therapist_dashboard' | 'crm' | 'superadmin';
+export const ALL_SCOPES: Scope[] = ['admin_dashboard', 'therapist_dashboard', 'crm', 'superadmin'];
 export const isScope = (v: any): v is Scope => ALL_SCOPES.includes(v);
 
-const BASE_SCOPE: Record<string, Scope> = {
-  therapist: 'therapist_dashboard',
-  admin: 'admin_dashboard',
-  superadmin: 'admin_dashboard',
-  fluidadmin: 'admin_dashboard',
-  sales: 'crm',
+/**
+ * Scopes that name a dashboard someone can stand in. `superadmin` is an
+ * elevation OF the admin dashboard, not a place to go — so it is never a
+ * handoff target and never appears in the switcher.
+ */
+export const DASHBOARD_SCOPES: Scope[] = ['admin_dashboard', 'therapist_dashboard', 'crm'];
+
+/**
+ * An array per role, not a single scope — a superadmin carries the admin
+ * dashboard they stand in AND the elevation behind it. The panel has always
+ * modelled it this way; this copy flattened it to one scope and lost the second.
+ */
+const BASE_SCOPES: Record<string, Scope[]> = {
+  therapist: ['therapist_dashboard'],
+  admin: ['admin_dashboard'],
+  superadmin: ['admin_dashboard', 'superadmin'],
+  fluidadmin: ['admin_dashboard', 'superadmin'],
+  sales: ['crm'],
 };
 
+export const baseScopesForRole = (role: any): Scope[] =>
+  BASE_SCOPES[String(role || '').toLowerCase()] ?? [];
+
 export const baseScopeForRole = (role: any): Scope | null =>
-  BASE_SCOPE[String(role || '').toLowerCase()] ?? null;
+  baseScopesForRole(role).find((s) => DASHBOARD_SCOPES.includes(s)) ?? null;
 
 const BASE_ADMIN_ROLES = ['admin', 'superadmin', 'fluidadmin'];
 export const isBaseAdminRole = (user: any): boolean =>
@@ -190,8 +216,7 @@ startAccessListener();
  * would outlive its revocation by up to a day.
  */
 export async function loadScopes(user: any): Promise<Set<Scope>> {
-  const base = baseScopeForRole(user?.role);
-  const fallback = new Set<Scope>(base ? [base] : []);
+  const fallback = new Set<Scope>(baseScopesForRole(user?.role));
   if (!user?.id) return fallback;
 
   const key = String(user.id);
@@ -199,8 +224,29 @@ export async function loadScopes(user: any): Promise<Set<Scope>> {
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.scopes;
 
   try {
-    const { rows } = await pool.query('SELECT scope FROM user_access_grants WHERE user_id = $1', [user.id]);
-    const scopes = new Set<Scope>(fallback);
+    // The ROLE is read from the database here, exactly as the panel reads it.
+    //
+    // This query used to select grants only, and derive the base scope from
+    // `user.role` — which is the decoded JWT. So the doc comment above was half
+    // true: grants were live, but the role-derived half was pinned to a 24-hour
+    // token. Demote someone from admin to therapist and the panel stopped
+    // honouring admin_dashboard within the 30s cache window while this service
+    // kept honouring it for up to a day. LISTEN/NOTIFY could not help, because
+    // clearing the cache just re-derived the same stale answer from the same
+    // stale token.
+    const { rows } = await pool.query(
+      `SELECT u.role, g.scope
+         FROM users u
+         LEFT JOIN user_access_grants g ON g.user_id = u.id
+        WHERE u.id = $1`,
+      [user.id]
+    );
+    // No row means no account. Left as the token's base rather than empty, for
+    // the same fail-open-on-base reason below — and a deleted user cannot log
+    // in again regardless.
+    if (rows.length === 0) return fallback;
+
+    const scopes = new Set<Scope>(baseScopesForRole(rows[0].role));
     for (const row of rows) if (isScope(row.scope)) scopes.add(row.scope);
     cache.set(key, { scopes, at: Date.now() });
     return scopes;
@@ -320,11 +366,15 @@ const SCOPED_ROUTES: { pattern: RegExp; scope: Scope }[] = [
 ];
 
 /**
- * Shadow mode by default: records what it would have blocked and lets it pass.
- * Set ACCESS_ENFORCE=true once the log is quiet. Routes with an explicit guard
- * are enforced either way.
+ * ENFORCES by default; shadow mode is opt-in via ACCESS_ENFORCE=false.
+ *
+ * Was shadow-by-default, and the variable turning it on was set in no
+ * environment anywhere — so the gate reported and passed everything for months.
+ * A check whose default is "off" is not a check. Must stay identical to
+ * panel-backend: one service enforcing while the other does not is a policy
+ * split. See that copy for how to stage a rollout.
  */
-const ENFORCING = String(process.env.ACCESS_ENFORCE || '').toLowerCase() === 'true';
+const ENFORCING = String(process.env.ACCESS_ENFORCE ?? 'true').toLowerCase() !== 'false';
 
 const shadowSeen = new Map<string, { route: string; role: string; scope: Scope; count: number; firstAt: string; lastAt: string }>();
 export const getShadowDenials = () => Array.from(shadowSeen.values()).sort((a, b) => b.count - a.count);
