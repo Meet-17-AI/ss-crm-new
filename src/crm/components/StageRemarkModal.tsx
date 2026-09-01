@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './StageRemarkModal.css';
+import { stageLabel } from '../lib/leadStage';
 
 interface StageRemarkModalProps {
     isOpen: boolean;
@@ -9,16 +10,6 @@ interface StageRemarkModalProps {
     onConfirm: (remark: string, followUpDate?: string, futureAction?: string) => void;
     onCancel: () => void;
 }
-
-const STAGE_LABELS: Record<string, string> = {
-    'lead-inquire': 'Lead / Inquire',
-    'followup-1': 'Follow Ups',
-    'pretherapy-call': 'Pre-therapy Call',
-    'booked-first-session': 'Booked First Session',
-    'referred': 'Referred',
-    'closed': 'Closed',
-    'dropouts': 'Unresponsive'
-};
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DAYS = ['Su','Mo','Tu','We','Th','Fr','Sa'];
@@ -180,12 +171,12 @@ const StageRemarkModal: React.FC<StageRemarkModalProps> = ({
 
                 {fromStage !== toStage && (
                     <div className="stage-arrow">
-                        <span className="stage-badge from">{STAGE_LABELS[fromStage] || fromStage}</span>
+                        <span className="stage-badge from">{stageLabel(fromStage)}</span>
                         <svg className="stage-arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <line x1="5" y1="12" x2="19" y2="12" />
                             <polyline points="12 5 19 12 12 19" />
                         </svg>
-                        <span className="stage-badge to">{STAGE_LABELS[toStage] || toStage}</span>
+                        <span className="stage-badge to">{stageLabel(toStage)}</span>
                     </div>
                 )}
 
@@ -246,12 +237,12 @@ const StageRemarkModal: React.FC<StageRemarkModalProps> = ({
                 )}
 
                 <label className="stage-remark-label">
-                    {fromStage === toStage ? 'Follow-up Notes' : 'Remark for "' + (STAGE_LABELS[toStage] || toStage) + '" stage'}
+                    {fromStage === toStage ? 'Follow-up Notes' : 'Remark for "' + stageLabel(toStage) + '" stage'}
                     <span>*</span>
                 </label>
                 <textarea
                     className={'stage-remark-textarea' + (showError ? ' error' : '')}
-                    placeholder={'What happened at the ' + (STAGE_LABELS[toStage] || toStage) + ' stage?'}
+                    placeholder={'What happened at the ' + stageLabel(toStage) + ' stage?'}
                     value={remark}
                     onChange={e => { setRemark(e.target.value); if (e.target.value.trim()) setShowError(false); }}
                     autoFocus={!isFollowUp}

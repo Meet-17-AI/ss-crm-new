@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import './StageRemarkModal.css';
+import { stageLabel } from '../lib/leadStage';
 
 interface PreTherapyFormData {
   age: string;
@@ -49,14 +50,6 @@ interface Props {
   onConfirm: (remark: string, formData: PreTherapyFormData, futureAction?: string) => void;
   onCancel: () => void;
 }
-
-const STAGE_LABELS: Record<string, string> = {
-  'lead-inquire': 'Lead / Inquire',
-  'pretherapy-call': 'Pre-therapy Call',
-  'followup-1': 'Follow ups',
-  'booked-first-session': 'Booked First Session',
-  'dropouts': 'Unresponsive'
-};
 
 export const emptyForm: PreTherapyFormData = {
   age: '', language: [], language_other: '', location: '', location_manual: '',
@@ -211,7 +204,7 @@ const PreTherapyCallFormModal: React.FC<Props> = ({ isOpen, leadName, fromStage,
         {/* Stage Arrow */}
         {!isEditMode && (
           <div className="stage-arrow" style={{ flexShrink: 0 }}>
-            <span className="stage-badge from">{STAGE_LABELS[fromStage] || fromStage}</span>
+            <span className="stage-badge from">{stageLabel(fromStage)}</span>
             <svg className="stage-arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
             </svg>

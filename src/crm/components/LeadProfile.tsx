@@ -7,6 +7,14 @@ import { SendBookingModal } from '../../../components/SendBookingModal'
 import { MoreVertical, Edit3 } from 'lucide-react'
 import PreTherapyCallFormModal, { PreTherapyFormData } from './PreTherapyCallFormModal'
 import StageRemarkModal from './StageRemarkModal'
+import {
+    STAGE_ORDER,
+    StageId,
+    stageLabel,
+    needsPreTherapyForm,
+    resolveFinalStage,
+    moveLeadStage,
+} from '../lib/leadStage'
 
 interface Lead {
     id: string
@@ -67,15 +75,22 @@ interface LeadProfileProps {
     source?: string
 }
 
-const STAGES = [
-    { id: 'lead-inquire', label: 'Lead / Inquire', remarkKey: 'remark_lead_inquire', timestampKey: 'stage_lead_inquire_at' },
-    { id: 'pretherapy-call', label: 'Pre-therapy Call', remarkKey: 'remark_pretherapy_call', timestampKey: 'stage_pretherapy_call_at' },
-    { id: 'followup-1', label: 'Follow ups', remarkKey: 'remark_followup_1', timestampKey: 'stage_followup_1_at', scheduledDateKey: 'follow_up_1_date' },
-    { id: 'booked-first-session', label: 'Booked First Session', remarkKey: 'remark_booked_first_session', timestampKey: 'stage_booked_first_session_at' },
-    { id: 'referred', label: 'Referred', remarkKey: 'remark_referred', timestampKey: 'stage_referred_at' },
-    { id: 'closed', label: 'Closed', remarkKey: 'remark_closed', timestampKey: 'stage_closed_at' },
-    { id: 'dropouts', label: 'Unresponsive', remarkKey: 'remark_unresponsive', timestampKey: 'stage_dropouts_at' },
-]
+/**
+ * Which lead columns each stage reads its remark and timestamp from. The order
+ * and the labels come from the shared stage table so this page and the pipeline
+ * board describe the journey the same way.
+ */
+const STAGE_FIELDS: Record<StageId, { remarkKey: string; timestampKey: string; scheduledDateKey?: string }> = {
+    'lead-inquire': { remarkKey: 'remark_lead_inquire', timestampKey: 'stage_lead_inquire_at' },
+    'pretherapy-call': { remarkKey: 'remark_pretherapy_call', timestampKey: 'stage_pretherapy_call_at' },
+    'followup-1': { remarkKey: 'remark_followup_1', timestampKey: 'stage_followup_1_at', scheduledDateKey: 'follow_up_1_date' },
+    'booked-first-session': { remarkKey: 'remark_booked_first_session', timestampKey: 'stage_booked_first_session_at' },
+    'referred': { remarkKey: 'remark_referred', timestampKey: 'stage_referred_at' },
+    'closed': { remarkKey: 'remark_closed', timestampKey: 'stage_closed_at' },
+    'dropouts': { remarkKey: 'remark_unresponsive', timestampKey: 'stage_dropouts_at' },
+}
+
+const STAGES = STAGE_ORDER.map(id => ({ id, label: stageLabel(id), ...STAGE_FIELDS[id] }))
 
 const SOURCE_OPTIONS = [
     'Chatbot',
@@ -224,6 +239,13 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
     const [isEditingForm, setIsEditingForm] = useState(false)
     const [isFollowupModalOpen, setIsFollowupModalOpen] = useState(false)
 
+    // A stage change chosen from this page, held until its remark is confirmed —
+    // the same two-step the pipeline board uses for a drag: choose, then justify.
+    const [pendingMove, setPendingMove] = useState<{ toStage: string } | null>(null)
+    const [isStageMenuOpen, setIsStageMenuOpen] = useState(false)
+    const [isMoving, setIsMoving] = useState(false)
+    const stageMenuRef = useRef<HTMLDivElement>(null)
+
     const canActOnLead = (leadData: Lead | null): boolean => {
         if (!currentUser || !leadData) return false
         return true
@@ -262,6 +284,7 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
             if (therapyRef.current && !therapyRef.current.contains(event.target as Node)) setIsTherapyOpen(false)
             if (modeRef.current && !modeRef.current.contains(event.target as Node)) setIsModeOpen(false)
             if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setShowDropdown(false)
+            if (stageMenuRef.current && !stageMenuRef.current.contains(event.target as Node)) setIsStageMenuOpen(false)
         }
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -426,31 +449,72 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
         }
     }
 
-    const handleFollowupConfirm = async (remark: string, followUpDate?: string, futureAction?: string) => {
-        setToast({ message: 'Saving follow-up...', type: 'success' })
+    /**
+     * Moves the lead to another stage — the same operation as dragging its card
+     * across the pipeline board, and stored identically, because both go through
+     * moveLeadStage. The remark, the stage timestamp, the follow-up slot cycling
+     * and the therapist lookup are all the server's doing either way.
+     *
+     * `isFollowup` distinguishes the shortcut button, which logs another attempt
+     * against a lead already in Follow Ups rather than moving it anywhere.
+     */
+    const performStageMove = async (
+        toStage: string,
+        remark: string,
+        opts: { followUpDate?: string; futureAction?: string; formData?: PreTherapyFormData; isFollowup?: boolean } = {}
+    ) => {
+        setIsMoving(true)
+        setToast({ message: opts.isFollowup ? 'Saving follow-up...' : 'Updating stage...', type: 'success' })
         try {
-            const res = await fetch(`/api/leads/${leadId}/stage`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    pipeline_stage: 'followup-1', 
-                    remark, 
-                    follow_up_date: followUpDate || undefined, 
-                    future_action: futureAction || undefined 
-                })
+            await moveLeadStage({
+                leadId,
+                toStage,
+                remark,
+                followUpDate: opts.followUpDate,
+                futureAction: opts.futureAction,
+                formData: opts.formData,
+                actingUser: { id: currentUser?.id, name: currentUser?.full_name || currentUser?.username },
             })
-            if (res.ok) {
-                const updatedRes = await fetch(`/api/leads/${leadId}`)
-                if (updatedRes.ok) setLead(await updatedRes.json())
-                setToast({ message: 'Follow-up saved successfully!', type: 'success' })
-            } else {
-                setToast({ message: 'Failed to save follow-up.', type: 'error' })
-            }
+
+            // Refetch rather than patching local state: the server may land the lead
+            // somewhere other than where it was sent (a pre-therapy outcome reroutes
+            // it), and it decides which follow-up slot was written.
+            const updatedRes = await fetch(`/api/leads/${leadId}`)
+            if (updatedRes.ok) setLead(await updatedRes.json())
+
+            const landed = resolveFinalStage(toStage, opts.formData?.consultation_outcome)
+            setToast({
+                message: opts.isFollowup
+                    ? 'Follow-up saved successfully!'
+                    : `Moved to ${stageLabel(landed)}`,
+                type: 'success',
+            })
         } catch (error) {
-            console.error('Failed to save follow-up:', error)
-            setToast({ message: 'Error saving follow-up.', type: 'error' })
+            console.error('Failed to update stage:', error)
+            setToast({
+                message: opts.isFollowup ? 'Failed to save follow-up.' : 'Failed to update stage.',
+                type: 'error',
+            })
+        } finally {
+            setIsMoving(false)
         }
+    }
+
+    const handleFollowupConfirm = async (remark: string, followUpDate?: string, futureAction?: string) => {
         setIsFollowupModalOpen(false)
+        await performStageMove('followup-1', remark, { followUpDate, futureAction, isFollowup: true })
+    }
+
+    const handleMoveConfirm = async (
+        remark: string,
+        followUpDate?: string,
+        futureAction?: string,
+        formData?: PreTherapyFormData
+    ) => {
+        const target = pendingMove?.toStage
+        if (!target) return
+        setPendingMove(null)
+        await performStageMove(target, remark, { followUpDate, futureAction, formData })
     }
 
     const handleEditFormSubmit = async (remark: string, formData: PreTherapyFormData) => {
@@ -564,6 +628,45 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
                     <span className="lp-status-badge active">
                         {lead.is_virtual ? 'NOT IN CRM' : (STAGES.find(s => s.id === lead.pipeline_stage)?.label || (lead.pipeline_stage ? lead.pipeline_stage.toUpperCase() : 'NEW'))}
                     </span>
+
+                    {/*
+                      Sits beside the badge on purpose: the badge says where the lead
+                      is, so the way to change it belongs in the same glance. A
+                      virtual profile has no lead row to move yet.
+                    */}
+                    {canAct && !lead.is_virtual && !isEditing && (
+                        <div className="lp-stage-move" ref={stageMenuRef}>
+                            <button
+                                type="button"
+                                className="lp-stage-move-btn"
+                                disabled={isMoving}
+                                onClick={() => setIsStageMenuOpen(o => !o)}
+                                title="Move this lead to another stage"
+                            >
+                                {isMoving ? 'Moving...' : 'Move Stage'}
+                                <svg className={`lp-stage-move-arrow ${isStageMenuOpen ? 'open' : ''}`} width="14" height="14" viewBox="0 0 16 16" fill="none">
+                                    <path d="M4 6L8 10L12 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                            </button>
+                            {isStageMenuOpen && (
+                                <div className="lp-dropdown-menu lp-stage-menu">
+                                    <div className="lp-stage-menu-label">Move to</div>
+                                    {STAGES.filter(s => s.id !== lead.pipeline_stage).map(s => (
+                                        <button
+                                            key={s.id}
+                                            className="lp-dropdown-item"
+                                            onClick={() => {
+                                                setIsStageMenuOpen(false)
+                                                setPendingMove({ toStage: s.id })
+                                            }}
+                                        >
+                                            {s.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     <div className="lp-header-actions" ref={dropdownRef}>
                         {lead.is_virtual && (
                             <button 
@@ -973,6 +1076,36 @@ const LeadProfile = ({ leadId, onBack, setCurrentPage, currentUser, source }: Le
                 onConfirm={handleFollowupConfirm}
                 onCancel={() => setIsFollowupModalOpen(false)}
             />
+
+            {/*
+              The same pair the board opens for a drag, and for the same reason: a
+              pre-therapy call is recorded with its clinical form, everything else
+              with a remark. Both modals refuse to confirm without one.
+            */}
+            {pendingMove && (
+                needsPreTherapyForm(pendingMove.toStage) ? (
+                    <PreTherapyCallFormModal
+                        isOpen={true}
+                        fromStage={lead.pipeline_stage}
+                        leadId={lead.id}
+                        leadName={lead.name}
+                        initialAge={lead.age?.toString()}
+                        onConfirm={(remark, formData, futureAction) =>
+                            handleMoveConfirm(remark, undefined, futureAction, formData)}
+                        onCancel={() => setPendingMove(null)}
+                    />
+                ) : (
+                    <StageRemarkModal
+                        isOpen={true}
+                        fromStage={lead.pipeline_stage}
+                        toStage={pendingMove.toStage}
+                        leadName={lead.name}
+                        onConfirm={(remark, followUpDate, futureAction) =>
+                            handleMoveConfirm(remark, followUpDate, futureAction)}
+                        onCancel={() => setPendingMove(null)}
+                    />
+                )
+            )}
 
             <SendBookingModal
                 isOpen={isModalOpen}

@@ -12,6 +12,7 @@ import { SendBookingModal } from '../../../components/SendBookingModal'
 import FollowupRemarksComponent from '../../../components/FollowupRemarksComponent'
 import PretherapyIconComponent from '../../../components/PretherapyIconComponent'
 import MonthFilter from './MonthFilter'
+import { STAGE_ORDER, STAGE_LABELS, resolveFinalStage, moveLeadStage } from '../lib/leadStage'
 
 interface Lead {
   id: string
@@ -50,27 +51,8 @@ interface PipelineContentProps {
   setCurrentPage?: (page: string) => void
 }
 
-// Defines the fixed forward-only order
-const STAGE_ORDER = [
-  'lead-inquire',
-  'pretherapy-call',
-  'followup-1',
-  'booked-first-session',
-  'referred',
-  'dropouts',
-  'closed'
-]
-
-const STAGE_LABELS: Record<string, string> = {
-  'lead-inquire': 'Lead / Inquire',
-  'pretherapy-call': 'Pre-therapy Call',
-  'followup-1': 'Follow Ups',
-  'booked-first-session': 'Booked First Session',
-  'referred': 'Referred',
-  'closed': 'Closed',
-  'dropouts': 'Unresponsive'
-}
-
+// Stage order and labels are shared with the lead profile, so the board and the
+// profile can never disagree about what the stages are — see lib/leadStage.
 const defaultStages: Stage[] = STAGE_ORDER.map(id => ({
   id,
   title: STAGE_LABELS[id],
@@ -291,7 +273,7 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
   }
 
   const isForwardMove = (fromId: string, toId: string): boolean => {
-    return STAGE_ORDER.indexOf(toId) > STAGE_ORDER.indexOf(fromId)
+    return STAGE_ORDER.indexOf(toId as any) > STAGE_ORDER.indexOf(fromId as any)
   }
 
   const handleDragStart = (lead: Lead, stageId: string) => {
@@ -409,20 +391,8 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
     if (!pendingDrop) return
     const { lead, fromStageId, toStageId } = pendingDrop
 
-    let finalStageId = toStageId;
+    const finalStageId = resolveFinalStage(toStageId, formData?.consultation_outcome);
     const finalTags = lead.tags;
-
-    if (toStageId === 'pretherapy-call' && formData?.consultation_outcome) {
-      if (formData.consultation_outcome === 'Session booked') {
-        finalStageId = 'booked-first-session';
-      } else if (formData.consultation_outcome === 'To be Followed up') {
-        finalStageId = 'followup-1';
-      } else if (formData.consultation_outcome === 'Referred') {
-        finalStageId = 'referred';
-      } else if (formData.consultation_outcome === 'Closed - Reason') {
-        finalStageId = 'closed';
-      }
-    }
 
     // Optimistic UI update
     const now = new Date().toISOString()
@@ -446,28 +416,17 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
 
     // Persist to backend
     try {
-      const response = await fetch(`/api/leads/${lead.id}/stage`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pipeline_stage: toStageId, remark, ...(followUpDate ? { follow_up_date: followUpDate } : {}), ...(futureAction ? { future_action: futureAction } : {}) }),
+      const updated = await moveLeadStage({
+        leadId: lead.id,
+        toStage: toStageId,
+        remark,
+        followUpDate,
+        futureAction,
+        formData,
+        actingUser: { id: currentUser?.id, name: currentUser?.full_name || currentUser?.username },
       })
-      if (!response.ok) throw new Error('Failed to update stage')
-
-      // If moving to pretherapy-call, also save the form data
-      if (toStageId === 'pretherapy-call' && formData) {
-        await fetch('/api/pretherapy-form', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            lead_id: lead.id,
-            submitted_by: currentUser?.id || null,
-            ...formData,
-          }),
-        })
-      }
 
       // Update card with real therapist_name returned from server
-      const updated = await response.json()
       if (updated?.therapist_name) {
         setStages(prev =>
           prev.map(stage => {
@@ -1008,26 +967,22 @@ const PipelineContent = ({ currentUser, setCurrentPage }: PipelineContentProps) 
                       const leadToUpdate = unresponsiveConfirmData;
                       setUnresponsiveConfirmData(null);
                       try {
-                        const res = await fetch(`/api/leads/${leadToUpdate.id}/stage`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ 
-                            pipeline_stage: 'dropouts', 
-                            remark: 'Marked unresponsive via toggle' 
-                          })
+                        await moveLeadStage({
+                          leadId: leadToUpdate.id,
+                          toStage: 'dropouts',
+                          remark: 'Marked unresponsive via toggle',
+                          actingUser: { id: currentUser?.id, name: currentUser?.full_name || currentUser?.username },
                         });
-                        if (res.ok) {
-                          setStages(prev => prev.map(s => {
-                            if (s.id === leadToUpdate.pipeline_stage || s.id === 'lead-inquire' || s.id === 'pretherapy-call' || s.id === 'followup-1') {
-                              return { ...s, leads: s.leads.filter(l => l.id !== leadToUpdate.id) }
-                            }
-                            if (s.id === 'dropouts') {
-                               return { ...s, leads: [...s.leads, { ...leadToUpdate, pipeline_stage: 'dropouts' }] }
-                            }
-                            return s;
-                          }));
-                          setToast({ message: 'Lead marked unresponsive', type: 'success' })
-                        }
+                        setStages(prev => prev.map(s => {
+                          if (s.id === leadToUpdate.pipeline_stage || s.id === 'lead-inquire' || s.id === 'pretherapy-call' || s.id === 'followup-1') {
+                            return { ...s, leads: s.leads.filter(l => l.id !== leadToUpdate.id) }
+                          }
+                          if (s.id === 'dropouts') {
+                             return { ...s, leads: [...s.leads, { ...leadToUpdate, pipeline_stage: 'dropouts' }] }
+                          }
+                          return s;
+                        }));
+                        setToast({ message: 'Lead marked unresponsive', type: 'success' })
                       } catch (err) {
                         console.error('Failed to update stage:', err)
                         setToast({ message: 'Failed to update stage', type: 'error' })

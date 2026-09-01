@@ -441,3 +441,62 @@
     background-color: #f8fafc;
     color: #21615D;
 }
+
+/* Move Stage control — sits next to the status badge in the header */
+.lp-stage-move {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.lp-stage-move-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.3rem 0.6rem;
+    background-color: white;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #334155;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+
+.lp-stage-move-btn:hover:not(:disabled) {
+    background-color: #f8fafc;
+    border-color: #21615D;
+    color: #21615D;
+}
+
+.lp-stage-move-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.lp-stage-move-arrow {
+    transition: transform 0.2s;
+}
+
+.lp-stage-move-arrow.open {
+    transform: rotate(180deg);
+}
+
+/* The shared menu anchors to the right; this one hangs off a control near the
+   left of the header, so it opens the other way to stay on screen. */
+.lp-stage-menu {
+    right: auto;
+    left: 0;
+    min-width: 200px;
+}
+
+.lp-stage-menu-label {
+    padding: 6px 14px 4px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #94a3b8;
+}
