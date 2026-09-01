@@ -146,7 +146,10 @@ const DashboardContent = ({ currentUser, setCurrentPage }: DashboardContentProps
   }
 
   return (
-    <div className="flex-1 h-screen overflow-auto bg-gray-50">
+    // The shell scrolls this now. h-screen here would be a full viewport tall
+    // INSIDE the space the header leaves over, putting the last rows below the
+    // fold with nothing able to scroll to them.
+    <div className="flex-1 min-h-full bg-gray-50">
       <div className="w-full relative min-h-full">
       <header className="mb-8 pt-8 pl-8 pr-8">
         <div className="flex justify-between items-start">

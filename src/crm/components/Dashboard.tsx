@@ -1,4 +1,5 @@
 import Sidebar from './Sidebar'
+import Header from './Header'
 import DashboardContent from './DashboardContent'
 import PipelineContent from './PipelineContent'
 import LeadsContent from './LeadsContent'
@@ -53,36 +54,42 @@ const Dashboard = ({ currentPage, setCurrentPage, currentUser, onLogout }: Dashb
         />
       )}
       <div className="w-64 flex-shrink-0">
-        <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} currentUser={currentUser} onLogout={onLogout} />
+        <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} />
       </div>
-      <div className={`flex-1 ${currentPage === 'pipeline' ? 'overflow-hidden flex flex-col' : 'overflow-auto'}`}>
-        {currentPage === 'analytics' && <DashboardContent currentUser={currentUser} setCurrentPage={setCurrentPage} />}
-        {currentPage === 'pipeline' && <PipelineContent currentUser={currentUser} setCurrentPage={setCurrentPage} />}
-        {currentPage === 'leads' && <LeadsContent setCurrentPage={setCurrentPage} />}
-        {currentPage.startsWith('lead-profile:') && (
-          <LeadProfile
-            leadId={currentPage.split(':')[1]}
-            onBack={() => setCurrentPage(currentPage.split(':')[2] || 'leads')}
-            setCurrentPage={setCurrentPage}
-            currentUser={currentUser}
-            source={currentPage.split(':')[2] || 'leads'}
-          />
-        )}
-        {currentPage === 'pretherapy' && <PreTherapyBookings currentUser={currentUser} setCurrentPage={setCurrentPage} />}
-        {currentPage === 'audit-logs' && <CRMAuditLogs />}
-        {currentPage === 'full-todo' && (
-          <ToDoModal 
-            isFullPage={true} 
-            setCurrentPage={setCurrentPage}
-            onViewLead={(leadId) => setCurrentPage(`lead-profile:${leadId}:full-todo`)}
-          />
-        )}
-        {currentPage === 'settings' && (
-          <AdminEditProfile user={currentUser} onBack={() => setCurrentPage('analytics')} />
-        )}
-        {currentPage === 'changePassword' && (
-          <ChangePassword user={currentUser} onBack={() => setCurrentPage('analytics')} />
-        )}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <Header setCurrentPage={setCurrentPage} currentUser={currentUser} onLogout={onLogout} />
+        {/* min-h-0 so this can actually shrink to what the header leaves it —
+            without it a flex child refuses to go below its content height and
+            the pipeline board pushes the page off the bottom. */}
+        <div className={`flex-1 min-h-0 ${currentPage === 'pipeline' ? 'overflow-hidden flex flex-col' : 'overflow-auto'}`}>
+          {currentPage === 'analytics' && <DashboardContent currentUser={currentUser} setCurrentPage={setCurrentPage} />}
+          {currentPage === 'pipeline' && <PipelineContent currentUser={currentUser} setCurrentPage={setCurrentPage} />}
+          {currentPage === 'leads' && <LeadsContent setCurrentPage={setCurrentPage} />}
+          {currentPage.startsWith('lead-profile:') && (
+            <LeadProfile
+              leadId={currentPage.split(':')[1]}
+              onBack={() => setCurrentPage(currentPage.split(':')[2] || 'leads')}
+              setCurrentPage={setCurrentPage}
+              currentUser={currentUser}
+              source={currentPage.split(':')[2] || 'leads'}
+            />
+          )}
+          {currentPage === 'pretherapy' && <PreTherapyBookings currentUser={currentUser} setCurrentPage={setCurrentPage} />}
+          {currentPage === 'audit-logs' && <CRMAuditLogs />}
+          {currentPage === 'full-todo' && (
+            <ToDoModal
+              isFullPage={true}
+              setCurrentPage={setCurrentPage}
+              onViewLead={(leadId) => setCurrentPage(`lead-profile:${leadId}:full-todo`)}
+            />
+          )}
+          {currentPage === 'settings' && (
+            <AdminEditProfile user={currentUser} onBack={() => setCurrentPage('analytics')} />
+          )}
+          {currentPage === 'changePassword' && (
+            <ChangePassword user={currentUser} onBack={() => setCurrentPage('analytics')} />
+          )}
+        </div>
       </div>
     </div>
   )
