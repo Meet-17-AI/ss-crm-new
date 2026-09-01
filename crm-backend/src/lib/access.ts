@@ -379,8 +379,80 @@ const ENFORCING = String(process.env.ACCESS_ENFORCE ?? 'true').toLowerCase() !==
 /** The gate's real state, for the diagnostic endpoint. See panel-backend. */
 export const isEnforcing = (): boolean => ENFORCING;
 
-const shadowSeen = new Map<string, { route: string; role: string; scope: Scope; count: number; firstAt: string; lastAt: string }>();
-export const getShadowDenials = () => Array.from(shadowSeen.values()).sort((a, b) => b.count - a.count);
+/**
+ * What the gate WOULD have blocked, while it runs in shadow mode.
+ *
+ * PERSISTED, because the decision it feeds takes a week and the process does not
+ * live that long. This was a Map on the reasoning that a one-off rollout
+ * diagnostic is not worth a table — true of the DATA, false of the JOB: every
+ * deploy, restart and idle spin-down emptied it, so whoever finally read the list
+ * would see only the traffic since the last restart and mistake a short quiet
+ * window for a clean week.
+ *
+ * Written fire-and-forget: a diagnostic must never slow or fail the request it
+ * is observing. Mirrors panel-backend — keep the two identical.
+ */
+const SERVICE = 'crm-backend';
+
+const SHADOW_TABLE = `
+  CREATE TABLE IF NOT EXISTS access_shadow_denials (
+    service    TEXT        NOT NULL,
+    route      TEXT        NOT NULL,
+    role       TEXT        NOT NULL,
+    scope      TEXT        NOT NULL,
+    count      BIGINT      NOT NULL DEFAULT 1,
+    first_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (service, route, role)
+  )`;
+
+let shadowTableReady: Promise<void> | null = null;
+const ensureShadowTable = (): Promise<void> =>
+  (shadowTableReady ??= pool.query(SHADOW_TABLE).then(
+    () => undefined,
+    (err: any) => {
+      shadowTableReady = null;
+      console.error('[access] could not create shadow denial table:', err?.message || err);
+      throw err;
+    }
+  ));
+
+/** Local dedup for the console only, so the log shows the distinct list once. */
+const shadowPrinted = new Set<string>();
+
+const recordShadowDenial = (route: string, role: string, scope: Scope): void => {
+  void ensureShadowTable()
+    .then(() =>
+      pool.query(
+        `INSERT INTO access_shadow_denials (service, route, role, scope)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (service, route, role)
+         DO UPDATE SET count = access_shadow_denials.count + 1, last_at = now()`,
+        [SERVICE, route, role, scope]
+      )
+    )
+    .catch((err: any) => console.error('[access] shadow denial not recorded:', err?.message || err));
+};
+
+/**
+ * Reads BOTH services' rows, not just this one's — the gate has to be switched on
+ * in both together, so the decision needs both halves in one list.
+ */
+export const getShadowDenials = async () => {
+  try {
+    await ensureShadowTable();
+    const { rows } = await pool.query(
+      `SELECT service, route, role, scope, count::int AS count,
+              first_at AS "firstAt", last_at AS "lastAt"
+         FROM access_shadow_denials ORDER BY count DESC`
+    );
+    return rows;
+  } catch {
+    // An unreadable diagnostic must not be reported as an empty one — that reads
+    // as "nothing would break", the single most dangerous wrong answer here.
+    throw new Error('shadow denial log is unavailable');
+  }
+};
 
 export const scopeGate = async (req: any, res: any, next: any) => {
   const path = req.path || '';
@@ -397,12 +469,13 @@ export const scopeGate = async (req: any, res: any, next: any) => {
 
   const role = String(req.user.role || 'unknown');
   if (!ENFORCING) {
-    const key = `${req.method} ${path}|${role}`;
-    const now = new Date().toISOString();
-    const seen = shadowSeen.get(key);
-    if (seen) { seen.count += 1; seen.lastAt = now; }
-    else {
-      shadowSeen.set(key, { route: `${req.method} ${path}`, role, scope: match.scope, count: 1, firstAt: now, lastAt: now });
+    const route = `${req.method} ${path}`;
+    const key = `${route}|${role}`;
+    recordShadowDenial(route, role, match.scope);
+    // Printed only the FIRST time in this process; the durable count is in the
+    // table, which both services and every instance share.
+    if (!shadowPrinted.has(key)) {
+      shadowPrinted.add(key);
       console.warn(`[access] SHADOW would deny ${role} ${req.method} ${path} — needs ${match.scope}`);
     }
     return next();
