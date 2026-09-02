@@ -139,15 +139,39 @@ jobs:
 
           # ═══ STAGE 2: SYNC source into place, then swap the container ═══
 
+          # .git is EXCLUDED from both copies, and that exclusion is the fix for
+          # a deploy that failed four times in a row:
+          #
+          #   cp: cannot create regular file '/opt/ss-crm/./.git/objects/…':
+          #   Permission denied
+          #
+          # Objects under /opt/ss-crm/.git are owned by another user — left over
+          # from a deploy that once ran as root — so the deploy user cannot
+          # overwrite them. cp then returned non-zero, the script treated that as
+          # "could not write new source", and rolled back to the old container.
+          # The application files themselves copied fine every time; the deploy
+          # was being defeated entirely by a directory it does not need.
+          #
+          # It genuinely does not need it: the commit being deployed is verified
+          # from the DEPLOYED_COMMIT file written at upload time, not from git
+          # metadata on the server. Nothing in this script reads $LIVE/.git.
+          #
+          # tar rather than cp because cp has no exclude option. Same semantics
+          # otherwise: files are overwritten in place, and files deleted from the
+          # repo are not removed from $LIVE — as before.
+          copy_tree() {  # copy_tree <src> <dst>
+            ( cd "$1" && tar cf - --exclude=./.git . ) | ( cd "$2" && tar xf - )
+          }
+
           rm -rf "$PREV"
           mkdir -p "$PREV"
           if [ -d "$LIVE" ]; then
-            cp -a "$LIVE/." "$PREV/" || { echo "❌ ABORT: could not snapshot current source."; exit 1; }
+            copy_tree "$LIVE" "$PREV" || { echo "❌ ABORT: could not snapshot current source."; exit 1; }
           fi
 
-          if ! cp -a "$STAGING/." "$LIVE/"; then
+          if ! copy_tree "$STAGING" "$LIVE"; then
             echo "🚨 Could not write new source into $LIVE — restoring snapshot."
-            cp -a "$PREV/." "$LIVE/" || true
+            copy_tree "$PREV" "$LIVE" || true
             exit 1
           fi
           cd "$LIVE" || exit 1
@@ -160,7 +184,9 @@ jobs:
               echo "⚠️ No previous image found."
             fi
             if [ -d "$PREV" ]; then
-              cp -a "$PREV/." "$LIVE/" || true
+              # Same .git exclusion as the forward copy — a rollback that cannot
+              # write is worse than a deploy that cannot.
+              copy_tree "$PREV" "$LIVE" || true
             fi
             cd "$LIVE" 2>/dev/null || return
             docker compose -p ss-crm up -d --no-build crm-backend || true
