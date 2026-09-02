@@ -275,10 +275,21 @@ export const requireScope = (scope: Scope) => async (req: any, res: any, next: a
 // Object-level ownership
 // ---------------------------------------------------------------------------
 
-/** May the caller act on this therapist's data? Their own, or an admin. */
+/**
+ * May the caller act on this therapist's data? Their own, or an admin.
+ *
+ * Two identifiers are accepted, matching panel-backend. A therapist is named by
+ * both users.id and users.therapist_id (a five-digit code), and routes disagree
+ * about which one their `therapist_id` parameter carries. Checking only the
+ * latter matched neither, and refused every therapist their own data with a 403.
+ * Both keys are unique to one user and both are read from the SESSION, so a
+ * therapist still cannot pass a colleague's id under either naming.
+ */
 export async function mayActAsTherapist(req: any, therapistId: any): Promise<boolean> {
   if (therapistId === null || therapistId === undefined || therapistId === '') return false;
-  if (req?.user?.therapist_id != null && String(req.user.therapist_id) === String(therapistId)) return true;
+  const wanted = String(therapistId);
+  if (req?.user?.id != null && String(req.user.id) === wanted) return true;
+  if (req?.user?.therapist_id != null && String(req.user.therapist_id) === wanted) return true;
   return (await loadScopes(req?.user)).has('admin_dashboard');
 }
 
