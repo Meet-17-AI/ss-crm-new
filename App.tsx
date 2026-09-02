@@ -6,6 +6,8 @@ import { Footer } from './components/Footer';
 import { Dashboard } from './components/Dashboard';
 import { TherapistDashboard } from './components/TherapistDashboard';
 import { MaintenancePage } from './components/MaintenancePage';
+// TEMPORARY, remove with the migration — see components/MigrationGate.tsx.
+import { MigrationGate } from './components/MigrationGate';
 import { SOSDocumentationView } from './components/SOSDocumentationView';
 import { PublicBookingContainer } from './components/PublicBookingContainer';
 import { BookingConfirmation } from './components/BookingConfirmation';
@@ -214,10 +216,14 @@ const App: React.FC = () => {
       window.history.replaceState({}, '', correctPath);
     }
 
-    if (role === 'therapist' && !forceCrm) {
-      return <TherapistDashboard onLogout={handleLogout} user={user} />;
-    }
-    return <CRMApp user={user} onLogout={handleLogout} />;
+    // TEMPORARY, remove with the migration — see components/MigrationGate.tsx.
+    return (
+      <MigrationGate user={user} onSignOut={handleLogout}>
+        {role === 'therapist' && !forceCrm
+          ? <TherapistDashboard onLogout={handleLogout} user={user} />
+          : <CRMApp user={user} onLogout={handleLogout} />}
+      </MigrationGate>
+    );
   }
 
   // Login page
