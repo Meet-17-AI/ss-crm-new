@@ -79,22 +79,23 @@ services:
       - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}
       - GMAIL_USER=${GMAIL_USER}
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD}
-      # REQUIRED, and its absence is fatal rather than degraded: crm-backend
-      # calls process.exit(1) at boot without it, because a service that cannot
-      # verify a token must not start and pretend to. It was missing from this
-      # block entirely, so the container would have refused to start on the
-      # first deploy carrying the shared-session code.
+      # NOTE ON WHERE THE NEW SETTINGS GO — they are NOT listed here on purpose.
       #
-      # It must be BYTE-IDENTICAL to panel-backend's. The panel signs the token,
-      # the CRM verifies it; a different secret makes every valid session look
-      # forged and dashboard switching stops working.
-      - JWT_SECRET=${JWT_SECRET}
-      # See the panel's compose for why ACCESS_ENFORCE defaults to the literal
-      # "false": an empty value would enforce, which is the opposite of intended.
-      - ACCESS_ENFORCE=${ACCESS_ENFORCE:-false}
-      - ACCESS_ADMIN_USERS=${ACCESS_ADMIN_USERS:-aiteam@fluid.live,aiteam}
-      - CSP_ENFORCE=${CSP_ENFORCE:-false}
-      - RATE_LIMIT_DISABLED=${RATE_LIMIT_DISABLED:-false}
+      # This service has `env_file: .env.production`, so every variable in that
+      # file already reaches the container. An entry in this `environment:`
+      # block OVERRIDES the env_file, and interpolates from the shell or the
+      # compose-directory .env — NOT from .env.production. So listing a variable
+      # here that is only defined in .env.production resolves to EMPTY and wipes
+      # the working value. For JWT_SECRET that is fatal: crm-backend calls
+      # process.exit(1) without it.
+      #
+      # Set JWT_SECRET, ACCESS_ENFORCE, ACCESS_ADMIN_USERS, CSP_ENFORCE and
+      # RATE_LIMIT_DISABLED in .env.production instead. ACCESS_ENFORCE must be
+      # the literal string "false" for shadow mode — the code enforces on any
+      # other value, an empty one included.
+      #
+      # The panel's compose has no env_file, which is why it needs the opposite
+      # treatment: there, every variable must be listed explicitly.
       - N8N_WEBHOOK_FETCH_SLOTS_PUBLIC=${N8N_WEBHOOK_FETCH_SLOTS_PUBLIC}
       - N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT=${N8N_WEBHOOK_FETCH_SLOTS_ADMIN_DIRECT}
       - N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT=${N8N_WEBHOOK_FETCH_SLOTS_ADMIN_PAYMENT}
