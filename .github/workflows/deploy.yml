@@ -266,7 +266,19 @@ jobs:
             C1=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/leads" || echo 000)
             C2=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/crm/todo" || echo 000)
             C3=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/socket.io/?EIO=4&transport=polling" || echo 000)
-            echo "  Public check $i/6: /api/leads=$C1 /api/crm/todo=$C2 /socket.io=$C3"
+            # Probed because its absence is INVISIBLE from the CRM.
+            #
+            # /api/handoff/redeem lives in crm-backend on 3003, while every other
+            # /api path outside /api/crm belongs to the server on 3002. When it
+            # had no router of its own the main rule claimed it, 3002 404'd, and
+            # the CRM simply showed its sign-in page — so "switch to CRM" looked
+            # like it did nothing, with nothing failing anywhere to say why.
+            # A bogus ticket is expected to be REJECTED by the app (400/401);
+            # a 404 means the route is misdirected again.
+            C4=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
+                 -H 'Content-Type: application/json' -d '{"ticket":"deploy-probe"}' \
+                 "https://crm.backend.$DN/api/handoff/redeem" || echo 000)
+            echo "  Public check $i/6: /api/leads=$C1 /api/crm/todo=$C2 /socket.io=$C3 /api/handoff/redeem=$C4"
             # 401 counts as SUCCESS, and insisting on 200 was a real bug.
             #
             # This step asks one question: is Traefik routing to the app? Any
@@ -278,8 +290,11 @@ jobs:
             # its auth gate /api/crm/todo began correctly answering 401 and this
             # check began rolling back healthy containers for it. It spent a
             # deploy asserting that the security fix was absent.
-            ok() { case "$1" in 200|401) return 0;; *) return 1;; esac; }
-            if ok "$C1" && ok "$C2" && ok "$C3"; then EXT_OK=1; break; fi
+            # 400 is included for the handoff probe: a deliberately invalid
+            # ticket SHOULD be refused, and being refused proves the route
+            # reached the service that owns it.
+            ok() { case "$1" in 200|400|401) return 0;; *) return 1;; esac; }
+            if ok "$C1" && ok "$C2" && ok "$C3" && ok "$C4"; then EXT_OK=1; break; fi
           done
 
           if [ "$EXT_OK" != "1" ]; then

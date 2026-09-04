@@ -35,6 +35,27 @@ services:
       - traefik.http.routers.crm-backend-crm.service=crm-backend-crm-service
       - traefik.http.services.crm-backend-crm-service.loadbalancer.server.port=3003
 
+      # Handoff Router (port 3003) — the ONLY /api path outside /api/crm that
+      # belongs to crm-backend rather than to the server on 3002.
+      #
+      # /api/handoff/redeem is what turns a one-time ticket from the panel into a
+      # CRM session, and it is defined in crm-backend/src/index.ts. Without this
+      # rule the main router above claimed it — PathPrefix(`/api`) minus
+      # /api/crm — and sent it to 3002, which does not define it. The redeem
+      # 404'd, the CRM fell back to its sign-in screen, and switching dashboards
+      # looked like it silently failed while every other part of the handoff
+      # worked.
+      #
+      # Priority is explicit rather than left to Traefik's rule-length default:
+      # relying on this rule happening to be longer than the main one is the sort
+      # of thing that breaks quietly when either rule is edited.
+      - traefik.http.routers.crm-backend-handoff.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api/handoff`)
+      - traefik.http.routers.crm-backend-handoff.priority=100
+      - traefik.http.routers.crm-backend-handoff.tls=true
+      - traefik.http.routers.crm-backend-handoff.entrypoints=web,websecure
+      - traefik.http.routers.crm-backend-handoff.tls.certresolver=mytlschallenge
+      - traefik.http.routers.crm-backend-handoff.service=crm-backend-crm-service
+
       # Socket.IO Router (port 3003) - Matches /socket.io for WebSockets
       - traefik.http.routers.crm-backend-socket.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/socket.io`)
       - traefik.http.routers.crm-backend-socket.tls=true
