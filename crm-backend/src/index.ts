@@ -7137,10 +7137,24 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Render (and most PaaS) assign the port and pass it in — binding to a fixed one
-// means the health check never connects and the deploy is marked failed. Falls
-// back to 3003 for local development, which is what the CRM's vite proxy expects.
-const PORT = parseInt(process.env.PORT || '3003');
+// PORT is deliberately NOT read here; CRM_PORT is.
+//
+// This process does not have the container to itself. It is started by
+//
+//   concurrently "tsx server/index.ts" "cd crm-backend && npx tsx src/index.ts" …
+//
+// alongside server/index.ts, which binds a hardcoded 3002 — and the deploy
+// writes PORT=3002 into .env.production for that one. Reading a generic PORT
+// here therefore aimed BOTH processes at 3002: this one lost the race, exited
+// with "Port is in use", the container failed its health check, and the deploy
+// rolled back. The Dockerfile exposes 3002 and 3003, the health check probes
+// both, and Traefik routes to both, so 3003 is this service's port by contract.
+//
+// The generic PORT came from the Render deployment, where this service owned its
+// container and the platform assigned the port. It has not run there since; in a
+// shared container the name is ambiguous, and that ambiguity cost four failed
+// deploys. CRM_PORT says which service it means and is still overridable.
+const PORT = parseInt(process.env.CRM_PORT || '3003');
 const httpServer = createServer(app);
 
 export const io = new SocketIOServer(httpServer, {
