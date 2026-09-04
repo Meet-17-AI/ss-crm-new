@@ -259,16 +259,53 @@ app.post('/api/handoff/redeem', async (req, res) => {
     const ticket = String(req.body?.ticket || '');
     if (!ticket) return res.status(400).json({ error: 'Missing ticket' });
 
+    // Every rejection below names a DIFFERENT cause.
+    //
+    // Both of these used to answer "Invalid or expired handoff", and the row
+    // check answered "already been used or has expired" — three distinct
+    // failures wearing two near-identical messages, each containing the word
+    // "expired". Diagnosing a broken handoff from the outside meant guessing
+    // which had fired, and that guessing cost a day. These messages are safe to
+    // be specific: the ticket is single-use and 60 seconds old at most, so
+    // saying why it was refused tells an attacker nothing they could use.
     let claims: any;
     try {
       claims = jwt.verify(ticket, process.env.JWT_SECRET as string);
-    } catch {
-      return res.status(401).json({ error: 'Invalid or expired handoff' });
+    } catch (err: any) {
+      const why = err?.name === 'TokenExpiredError'
+        // The signature was fine and the clock disagreed: more than 60 seconds
+        // passed between the panel issuing this and the CRM opening it, or the
+        // two services' clocks differ.
+        ? 'Handoff ticket expired before it was opened (valid for 60 seconds).'
+        : err?.name === 'JsonWebTokenError'
+        // A wrong JWT_SECRET lands here — the panel signs, this verifies.
+        ? 'Handoff ticket signature is not valid — JWT_SECRET may not match panel-backend.'
+        : 'Handoff ticket could not be read.';
+      console.error('[handoff] verify failed:', err?.name, err?.message);
+      return res.status(401).json({ error: why });
     }
     if (claims?.purpose !== 'handoff' || !claims?.jti) {
       // A normal session token must not work here — that would turn this public
       // route into a way to mint fresh sessions from a stolen one indefinitely.
-      return res.status(401).json({ error: 'Invalid or expired handoff' });
+      console.error('[handoff] wrong claims:', { purpose: claims?.purpose, hasJti: !!claims?.jti });
+      return res.status(401).json({ error: 'That is not a handoff ticket.' });
+    }
+
+    // Looked up before deleting so "never existed" and "expired" can be told
+    // apart. One extra query on a route that runs once per dashboard switch.
+    const found = await pool.query(
+      'SELECT expires_at, (expires_at > now()) AS live FROM auth_handoff_tokens WHERE jti = $1',
+      [claims.jti]
+    );
+    if (found.rows.length === 0) {
+      console.error('[handoff] no row for jti', claims.jti, '— already redeemed, or a different database');
+      return res.status(401).json({
+        error: 'This handoff has already been used, or was issued against a different database.',
+      });
+    }
+    if (!found.rows[0].live) {
+      console.error('[handoff] row expired at', found.rows[0].expires_at);
+      return res.status(401).json({ error: 'This handoff expired before it reached the CRM.' });
     }
 
     const spent = await pool.query(
@@ -278,7 +315,7 @@ app.post('/api/handoff/redeem', async (req, res) => {
       [claims.jti]
     );
     if (spent.rows.length === 0) {
-      return res.status(401).json({ error: 'This handoff link has already been used or has expired.' });
+      return res.status(401).json({ error: 'This handoff was used a moment ago by another request.' });
     }
 
     const { rows } = await pool.query(
