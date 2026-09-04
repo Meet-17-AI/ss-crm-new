@@ -146,6 +146,13 @@ const App: React.FC = () => {
       } catch (e: any) {
         // Fall back to the normal login form with an explanation, rather than a
         // blank screen or a silent bounce.
+        //
+        // Also logged, because the explanation used to be captured here and
+        // rendered NOWHERE: a failed handoff dropped the user on the sign-in
+        // form with no indication that anything had been attempted, let alone
+        // what went wrong. It cost a day of diagnosing "the CRM switch does
+        // nothing" from the outside.
+        console.error('[handoff] redeem failed:', e);
         setHandoffError(e?.message || 'Could not sign you in from the panel.');
         setHandoff('failed');
       }
@@ -183,6 +190,33 @@ const App: React.FC = () => {
         <div className="text-center">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-teal-500 border-t-transparent" />
           <p className="text-sm text-gray-500">Signing you in…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // A failed handoff SAYS SO. This state existed and rendered nothing, so the
+  // app fell through to the sign-in form and the reason — already captured in
+  // handoffError — was discarded. Someone switching from the panel simply
+  // arrived at a login page, with no way to tell a broken handoff from having
+  // been signed out. Signing in by hand still works, and is offered here.
+  if (handoff === 'failed') {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-gray-50 p-6">
+        <div className="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-lg">
+          <h1 className="text-base font-semibold text-gray-900">Could not sign you in from the panel</h1>
+          <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-200">
+            {handoffError || 'The sign-in handoff failed.'}
+          </p>
+          <p className="mt-4 text-sm text-gray-500">
+            You can sign in below instead, or go back to the panel and try again.
+          </p>
+          <button
+            onClick={() => setHandoff('none')}
+            className="mt-5 w-full rounded-lg bg-teal-700 py-2.5 text-sm font-semibold text-white hover:bg-teal-800"
+          >
+            Continue to sign in
+          </button>
         </div>
       </div>
     );
