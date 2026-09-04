@@ -67,7 +67,44 @@ jobs:
           N8N_WEBHOOK_RESCHEDULE_BOOKING=${{ secrets.N8N_WEBHOOK_RESCHEDULE_BOOKING }}
           N8N_WEBHOOK_ISSUE_REPORT=${{ secrets.N8N_WEBHOOK_ISSUE_REPORT }}
           N8N_WEBHOOK_SOS_EMAIL=${{ secrets.N8N_WEBHOOK_SOS_EMAIL }}
+
+          # Session signing. Must be BYTE-IDENTICAL to panel-backend's: the panel
+          # signs the token and this service verifies it, so a different value
+          # makes every valid session look forged. crm-backend calls
+          # process.exit(1) without it, which is why its absence is a failed
+          # deploy rather than a degraded one.
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN }}
+
+          # Access and hardening. Empty is a valid value for all of these — the
+          # code carries its own defaults — but they have to be listed HERE to be
+          # settable at all, for the reason below.
+          ACCESS_ENFORCE=${{ secrets.ACCESS_ENFORCE }}
+          ACCESS_ADMIN_USERS=${{ secrets.ACCESS_ADMIN_USERS }}
+          CSP_ENFORCE=${{ secrets.CSP_ENFORCE }}
+          RATE_LIMIT_DISABLED=${{ secrets.RATE_LIMIT_DISABLED }}
+          ALLOWED_ORIGINS=${{ secrets.ALLOWED_ORIGINS }}
           ENV_EOF
+
+          # THIS FILE IS REGENERATED ON EVERY DEPLOY AND COPIED OVER THE SERVER'S.
+          #
+          # So editing /opt/ss-crm/.env.production by hand survives only until the
+          # next deploy, which overwrites it — and the rollback then restores the
+          # hand-edited copy, so the value looks present on the running container
+          # while every NEW container starts without it.
+          #
+          # That is precisely how JWT_SECRET went missing: added on the server,
+          # wiped by this block, and four deploys died on "JWT_SECRET is not set"
+          # while `docker exec ... printenv` showed it set with 64 characters.
+          # Anything this service needs belongs in a repository secret and in the
+          # list above. Nowhere else.
+          if ! grep -q '^JWT_SECRET=..*' .env.production; then
+            echo "❌ ABORT: the JWT_SECRET repository secret is empty."
+            echo "   crm-backend exits at boot without it, so this deploy would build,"
+            echo "   fail its health check and roll back. Set the secret to the panel's"
+            echo "   value, byte for byte, then re-run."
+            exit 1
+          fi
 
           if ! grep -q '^DOMAIN_NAME=..*' .env.production; then
             echo "❌ ABORT: DOMAIN_NAME secret is empty — Traefik router rules would break."
