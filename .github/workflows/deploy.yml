@@ -267,7 +267,19 @@ jobs:
             C2=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/api/crm/todo" || echo 000)
             C3=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "https://crm.backend.$DN/socket.io/?EIO=4&transport=polling" || echo 000)
             echo "  Public check $i/6: /api/leads=$C1 /api/crm/todo=$C2 /socket.io=$C3"
-            if [ "$C1" = "200" ] && [ "$C2" = "200" ] && [ "$C3" = "200" ]; then EXT_OK=1; break; fi
+            # 401 counts as SUCCESS, and insisting on 200 was a real bug.
+            #
+            # This step asks one question: is Traefik routing to the app? Any
+            # answer the application itself produced proves it is. A 401 proves
+            # MORE than a 200 — the request reached the app AND the auth gate
+            # ran — whereas 000, 502 or 404 mean the request never arrived.
+            #
+            # These probes are unauthenticated by nature, so once the CRM gained
+            # its auth gate /api/crm/todo began correctly answering 401 and this
+            # check began rolling back healthy containers for it. It spent a
+            # deploy asserting that the security fix was absent.
+            ok() { case "$1" in 200|401) return 0;; *) return 1;; esac; }
+            if ok "$C1" && ok "$C2" && ok "$C3"; then EXT_OK=1; break; fi
           done
 
           if [ "$EXT_OK" != "1" ]; then
