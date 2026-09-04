@@ -9,9 +9,9 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     healthcheck:
-      # Checks BOTH backend processes: panel server (3002) and CRM server (3003).
-      # If either dies, the container goes unhealthy and restarts (restart: always).
-      test: ["CMD", "node", "-e", "const http=require('http'); const check=(port)=>new Promise((ok,bad)=>{const r=http.request({host:'127.0.0.1',port,path:'/health',timeout:2000},res=>res.statusCode===200?ok():bad());r.on('error',bad);r.on('timeout',()=>{r.destroy();bad();});r.end();}); Promise.all([check(3002),check(3003)]).then(()=>process.exit(0),()=>process.exit(1));"]
+      # One backend now: crm-backend on 3003. 3002 used to run server/index.ts,
+      # a stale fork of this same service — see the router note below.
+      test: ["CMD", "node", "-e", "const http=require('http'); const r=http.request({host:'127.0.0.1',port:3003,path:'/health',timeout:2000},res=>process.exit(res.statusCode===200?0:1)); r.on('error',()=>process.exit(1)); r.on('timeout',()=>{r.destroy();process.exit(1);}); r.end();"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -19,42 +19,31 @@ services:
     labels:
       - traefik.enable=true
       
-      # Main Backend Router (port 3002) - Matches /api (excluding /api/crm)
-      - traefik.http.routers.crm-backend-main.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api`) && !PathPrefix(`/api/crm`)
-      - traefik.http.routers.crm-backend-main.tls=true
-      - traefik.http.routers.crm-backend-main.entrypoints=web,websecure
-      - traefik.http.routers.crm-backend-main.tls.certresolver=mytlschallenge
-      - traefik.http.routers.crm-backend-main.service=crm-backend-main-service
-      - traefik.http.services.crm-backend-main-service.loadbalancer.server.port=3002
-
-      # CRM Backend Router (port 3003) - Matches /api/crm
-      - traefik.http.routers.crm-backend-crm.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api/crm`)
-      - traefik.http.routers.crm-backend-crm.tls=true
-      - traefik.http.routers.crm-backend-crm.entrypoints=web,websecure
-      - traefik.http.routers.crm-backend-crm.tls.certresolver=mytlschallenge
-      - traefik.http.routers.crm-backend-crm.service=crm-backend-crm-service
+      # ONE router for the whole API, pointing at crm-backend on 3003.
+      #
+      # There used to be three, splitting /api by path between two ports, because
+      # this container ran TWO servers: server/index.ts on 3002 and crm-backend on
+      # 3003. They were not different services. They were forks of the same one —
+      # 109 shared route paths, of which 78 were byte-identical, and NOT ONE route
+      # existed only in server/index.ts. crm-backend was strictly the newer copy.
+      #
+      # Traefik sent everything except /api/crm to the OLDER fork, so 92 routes
+      # were served by code with no auth gate, no scope gate and no rate limiting,
+      # while the hardened copy handled four. /api/verify-password on 3002 would
+      # check ANY named user's password; the 3003 version checks the caller's own.
+      # Four routes — /api/me/access, /api/handoff, /api/handoff/redeem and
+      # /api/admin/access-shadow-denials — existed only on 3003 and were simply
+      # unreachable, which is why the panel's "switch to CRM" landed on a login
+      # page: the redeem POST went to a server that had never heard of it.
+      #
+      # Routing everything to 3003 retires the fork, makes those four reachable,
+      # and puts every route behind the gate it was written for.
+      - traefik.http.routers.crm-backend-api.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api`)
+      - traefik.http.routers.crm-backend-api.tls=true
+      - traefik.http.routers.crm-backend-api.entrypoints=web,websecure
+      - traefik.http.routers.crm-backend-api.tls.certresolver=mytlschallenge
+      - traefik.http.routers.crm-backend-api.service=crm-backend-crm-service
       - traefik.http.services.crm-backend-crm-service.loadbalancer.server.port=3003
-
-      # Handoff Router (port 3003) — the ONLY /api path outside /api/crm that
-      # belongs to crm-backend rather than to the server on 3002.
-      #
-      # /api/handoff/redeem is what turns a one-time ticket from the panel into a
-      # CRM session, and it is defined in crm-backend/src/index.ts. Without this
-      # rule the main router above claimed it — PathPrefix(`/api`) minus
-      # /api/crm — and sent it to 3002, which does not define it. The redeem
-      # 404'd, the CRM fell back to its sign-in screen, and switching dashboards
-      # looked like it silently failed while every other part of the handoff
-      # worked.
-      #
-      # Priority is explicit rather than left to Traefik's rule-length default:
-      # relying on this rule happening to be longer than the main one is the sort
-      # of thing that breaks quietly when either rule is edited.
-      - traefik.http.routers.crm-backend-handoff.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/api/handoff`)
-      - traefik.http.routers.crm-backend-handoff.priority=100
-      - traefik.http.routers.crm-backend-handoff.tls=true
-      - traefik.http.routers.crm-backend-handoff.entrypoints=web,websecure
-      - traefik.http.routers.crm-backend-handoff.tls.certresolver=mytlschallenge
-      - traefik.http.routers.crm-backend-handoff.service=crm-backend-crm-service
 
       # Socket.IO Router (port 3003) - Matches /socket.io for WebSockets
       - traefik.http.routers.crm-backend-socket.rule=Host(`crm.backend.${DOMAIN_NAME}`) && PathPrefix(`/socket.io`)

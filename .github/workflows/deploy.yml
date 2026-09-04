@@ -22,7 +22,6 @@ jobs:
 
           cat > .env.production << 'ENV_EOF'
           NODE_ENV=production
-          PORT=3002
 
           # Database
           PGHOST=${{ secrets.PGHOST }}

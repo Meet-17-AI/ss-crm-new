@@ -20,7 +20,8 @@ RUN npm ci
 WORKDIR /app
 
 # Expose the ports for both backends
-EXPOSE 3002
+# 3002 is no longer used: server/index.ts, the stale fork that listened on it,
+# is no longer started. See the router note in docker-compose.yml.
 EXPOSE 3003
 
 # Command to run both servers and the sync daemon concurrently

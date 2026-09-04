@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"tsx server/index.ts\" \"cd crm-backend && npx tsx src/index.ts\" \"npm run sync\"",
-    "server": "concurrently \"tsx server/index.ts\" \"cd crm-backend && npx tsx src/index.ts\" \"npm run sync\"",
+    "dev": "concurrently \"vite\" \"cd crm-backend && npx tsx src/index.ts\" \"npm run sync\"",
+    "server": "concurrently \"cd crm-backend && npx tsx src/index.ts\" \"npm run sync\"",
     "build": "vite build",
     "preview": "vite preview",
     "notify:new": "tsx scripts/notifyNewBookings.ts",
